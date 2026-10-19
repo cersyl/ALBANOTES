@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>Carnet</title>
+  <meta name="theme-color" content="#f6f6f6" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101010" media="(prefers-color-scheme: dark)">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <!-- Connexion -->
+  <section id="login" class="login" hidden>
+    <form id="loginForm" class="login-card">
+      <img src="/icons/icon-192.png" alt="" width="72" height="72">
+      <h1>Carnet</h1>
+      <p>Vos notes, synchronisées sur votre serveur.</p>
+      <input id="loginPw" type="password" placeholder="Mot de passe" autocomplete="current-password" required>
+      <button type="submit" class="btn-primary">Se connecter</button>
+      <p id="loginErr" class="err"></p>
+    </form>
+  </section>
+
+  <!-- Tiroir latéral -->
+  <div id="scrim" class="scrim"></div>
+  <nav id="drawer" class="drawer" aria-label="Dossiers">
+    <div class="drawer-head">
+      <span class="drawer-title">Carnet</span>
+      <button class="icon-btn" data-action="settings" title="Paramètres"><i data-i="settings"></i></button>
+    </div>
+    <div id="drawerList" class="drawer-list"></div>
+    <button class="drawer-item add" data-action="new-folder"><i data-i="folderPlus"></i><span>Nouveau dossier</span></button>
+  </nav>
+
+  <!-- Liste des notes -->
+  <main id="home" class="home">
+    <header class="hero">
+      <h1 id="viewTitle">Toutes les notes</h1>
+      <p id="viewCount" class="count"></p>
+    </header>
+    <div id="toolbar" class="toolbar">
+      <button class="icon-btn" data-action="drawer" title="Menu"><i data-i="menu"></i></button>
+      <div class="search-wrap" id="searchWrap">
+        <i data-i="search"></i>
+        <input id="search" type="search" placeholder="Rechercher" autocomplete="off">
+      </div>
+      <span class="spacer"></span>
+      <span id="syncDot" class="sync-dot" title="Synchronisation"></span>
+      <button class="icon-btn" data-action="search" title="Rechercher (Ctrl+F)"><i data-i="search"></i></button>
+      <button class="icon-btn" data-action="layout" title="Affichage"><i data-i="grid" id="layoutIcon"></i></button>
+      <button class="icon-btn" data-action="sort" title="Trier"><i data-i="sort"></i></button>
+    </div>
+    <!-- Barre de sélection -->
+    <div id="selbar" class="toolbar selbar" hidden>
+      <button class="icon-btn" data-action="sel-cancel" title="Annuler"><i data-i="close"></i></button>
+      <span id="selCount" class="sel-count">0</span>
+      <span class="spacer"></span>
+      <button class="icon-btn" data-action="sel-all" title="Tout sélectionner"><i data-i="checkAll"></i></button>
+      <button class="icon-btn not-trash" data-action="sel-fav" title="Favori"><i data-i="star"></i></button>
+      <button class="icon-btn not-trash" data-action="sel-move" title="Déplacer"><i data-i="folder"></i></button>
+      <button class="icon-btn only-trash" data-action="sel-restore" title="Restaurer"><i data-i="restore"></i></button>
+      <button class="icon-btn" data-action="sel-delete" title="Supprimer"><i data-i="trash"></i></button>
+    </div>
+    <div id="notes" class="notes grid"></div>
+    <div id="empty" class="empty" hidden>
+      <i data-i="note"></i>
+      <p>Aucune note</p>
+    </div>
+    <button id="fab" class="fab" data-action="new-note" title="Nouvelle note (Alt+N)"><i data-i="edit"></i></button>
+  </main>
+
+  <!-- Éditeur -->
+  <section id="editor" class="editor" hidden>
+    <header class="ed-top">
+      <button class="icon-btn" data-action="ed-back" title="Retour (Échap)"><i data-i="back"></i></button>
+      <span class="spacer"></span>
+      <button class="icon-btn" data-action="ed-undo" title="Annuler"><i data-i="undo"></i></button>
+      <button class="icon-btn" data-action="ed-redo" title="Rétablir"><i data-i="redo"></i></button>
+      <button class="icon-btn" data-action="ed-fav" title="Favori"><i data-i="star" id="edFavIcon"></i></button>
+      <button class="icon-btn" data-action="ed-more" title="Plus"><i data-i="more"></i></button>
+    </header>
+    <div class="ed-scroll" id="edScroll">
+      <input id="edTitle" class="ed-title" placeholder="Titre" autocomplete="off">
+      <div class="ed-meta"><button id="edFolder" class="chip" data-action="ed-folder"></button><span id="edDate"></span></div>
+      <div id="edBody" class="ed-body" contenteditable="true" spellcheck="true" data-placeholder="Commencez à écrire…"></div>
+    </div>
+    <div class="ed-tools" id="edTools">
+      <button class="tool" data-cmd="checklist" title="Liste de tâches"><i data-i="checkbox"></i></button>
+      <button class="tool" data-cmd="draw" title="Dessin"><i data-i="pen"></i></button>
+      <button class="tool" data-cmd="image" title="Image"><i data-i="image"></i></button>
+      <span class="sep"></span>
+      <button class="tool" data-cmd="text" title="Style du texte"><i data-i="textSize"></i></button>
+      <button class="tool" data-cmd="bold" title="Gras (Ctrl+B)"><i data-i="bold"></i></button>
+      <button class="tool" data-cmd="italic" title="Italique (Ctrl+I)"><i data-i="italic"></i></button>
+      <button class="tool" data-cmd="underline" title="Souligné (Ctrl+U)"><i data-i="underline"></i></button>
+      <button class="tool" data-cmd="strikeThrough" title="Barré"><i data-i="strike"></i></button>
+      <button class="tool" data-cmd="color" title="Couleur du texte"><i data-i="color"></i></button>
+      <button class="tool" data-cmd="highlight" title="Surligner"><i data-i="highlight"></i></button>
+      <button class="tool" data-cmd="insertUnorderedList" title="Liste à puces"><i data-i="bullets"></i></button>
+      <button class="tool" data-cmd="insertOrderedList" title="Liste numérotée"><i data-i="numbers"></i></button>
+      <button class="tool" data-cmd="indent" title="Retrait"><i data-i="indent"></i></button>
+      <button class="tool" data-cmd="outdent" title="Retrait inverse"><i data-i="outdent"></i></button>
+      <button class="tool" data-cmd="hr" title="Séparateur"><i data-i="hr"></i></button>
+    </div>
+    <input id="imgInput" type="file" accept="image/*" hidden multiple>
+  </section>
+
+  <!-- Dessin -->
+  <section id="draw" class="draw" hidden>
+    <header class="ed-top">
+      <button class="icon-btn" data-action="draw-cancel" title="Annuler"><i data-i="close"></i></button>
+      <span class="spacer"></span>
+      <button class="icon-btn" data-action="draw-undo" title="Annuler le trait"><i data-i="undo"></i></button>
+      <button class="icon-btn" data-action="draw-redo" title="Rétablir"><i data-i="redo"></i></button>
+      <button class="icon-btn" data-action="draw-clear" title="Effacer tout"><i data-i="trash"></i></button>
+      <button class="btn-text" data-action="draw-save">Terminé</button>
+    </header>
+    <div class="draw-stage" id="drawStage">
+      <canvas id="drawBase"></canvas>
+      <canvas id="drawLive"></canvas>
+    </div>
+    <div class="draw-tools">
+      <button class="tool active" data-pen="pen" title="Stylo"><i data-i="pen"></i></button>
+      <button class="tool" data-pen="marker" title="Surligneur"><i data-i="highlight"></i></button>
+      <button class="tool" data-pen="eraser" title="Gomme"><i data-i="eraser"></i></button>
+      <span class="sep"></span>
+      <div id="drawColors" class="swatches"></div>
+      <input id="drawSize" type="range" min="1" max="24" value="3" title="Épaisseur">
+    </div>
+  </section>
+
+  <!-- Feuille / menus / dialogues -->
+  <div id="sheet" class="sheet" hidden><div class="sheet-card" id="sheetCard"></div></div>
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
