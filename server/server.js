@@ -19,6 +19,8 @@ const MAX_BODY = 50 * 1024 * 1024; // 50 Mo (images et croquis inclus dans les n
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const db = new DatabaseSync(path.join(DATA_DIR, 'carnet.db'));
+// attendre jusqu'à 10 s si la base est verrouillée (service + commande carnet simultanés)
+db.exec('PRAGMA busy_timeout = 10000');
 db.exec(`
   PRAGMA journal_mode = WAL;
   PRAGMA synchronous = NORMAL;
