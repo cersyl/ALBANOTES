@@ -261,3 +261,23 @@ i[data-i] svg { width: 100%; height: 100%; fill: currentColor; }
 .drop-chip.danger { color: #d93b3b; }
 .drop-chip.drop-over { background: var(--accent); color: #fff; transform: scale(1.06); }
 .drop-chip.danger.drop-over { background: #d93b3b; }
+
+/* ---------- Blocs dans la note ---------- */
+.ed-body-wrap { position: relative; }
+.ed-body .nb { position: relative; margin: 10px 0; padding: 12px 44px 12px 14px; border-radius: 16px;
+  background: color-mix(in srgb, var(--text) 5%, transparent); border: 1px solid color-mix(in srgb, var(--text) 10%, transparent); }
+.nb[data-c="yellow"] { background: var(--n-yellow); } .nb[data-c="orange"] { background: var(--n-orange); }
+.nb[data-c="pink"] { background: var(--n-pink); } .nb[data-c="purple"] { background: var(--n-purple); }
+.nb[data-c="blue"] { background: var(--n-blue); } .nb[data-c="green"] { background: var(--n-green); }
+.nb[data-c="gray"] { background: var(--n-gray); }
+.ed-body .nb:not([data-c="default"]) { border-color: color-mix(in srgb, var(--text) 14%, transparent); }
+.ed-body .nb > :first-child { margin-top: 0; }
+.ed-body .nb.drag-src { opacity: .3; }
+.blk-layer { position: absolute; inset: 0; pointer-events: none; }
+.blk-h { position: absolute; width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; pointer-events: auto;
+  color: var(--text-2); background: color-mix(in srgb, var(--surface) 70%, transparent); touch-action: none; cursor: grab; }
+.blk-h:hover { color: var(--accent); background: var(--surface); }
+.blk-h svg { width: 20px; height: 20px; fill: currentColor; }
+.blk-drop { position: absolute; height: 4px; border-radius: 2px; background: var(--accent); pointer-events: none; }
+.nb.drag-ghost { padding: 12px 44px 12px 14px; border-radius: 16px; font-size: 17px; line-height: 1.6; color: var(--text); border: 1px solid var(--line); }
+.nb.drag-ghost[data-c="default"] { background: var(--surface); }

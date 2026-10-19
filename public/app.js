@@ -38,6 +38,7 @@ const ICONS = {
   indent: 'M3 21h18v-2H3v2zM3 8v8l4-4-4-4zm8 9h10v-2H11v2zM3 3v2h18V3H3zm8 6h10V7H11v2zm0 4h10v-2H11v2z',
   outdent: 'M11 17h10v-2H11v2zm-8-5 4 4V8l-4 4zm0 9h18v-2H3v2zM3 3v2h18V3H3zm8 6h10V7H11v2zm0 4h10v-2H11v2z',
   hr: 'M4 11h16v2H4z',
+  block: 'M19 3H5c-1.1 0-2 .9-2 2v6h18V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-6H3v6z',
   eraser: 'M16.24 3.56l4.95 4.94c.78.79.78 2.05 0 2.84L12 20.53a4.008 4.008 0 0 1-5.66 0L2.81 17c-.78-.79-.78-2.05 0-2.84l10.6-10.6c.79-.78 2.05-.78 2.83 0zM4.22 15.58l3.54 3.53c.78.79 2.04.79 2.83 0l3.53-3.53-4.95-4.95-4.95 4.95z',
   logout: 'M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z',
   download: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z',
@@ -372,7 +373,8 @@ function dragEngine(root, selector, o) {
     const el = e.target.closest(selector);
     if (!el || e.button > 0 || st || (o.canStart && !o.canStart(el))) return;
     const mouse = e.pointerType === 'mouse';
-    st = { el, key: o.key(el), x: e.clientX, y: e.clientY, pid: e.pointerId, mouse, armed: mouse, dragging: false, fired: false };
+    st = { el, key: o.key(el), x: e.clientX, y: e.clientY, pid: e.pointerId, mouse, armed: mouse || !!o.immediate, dragging: false, fired: false };
+    if (o.immediate) { e.preventDefault(); return; } // poignée dédiée : glisser sans appui long
     st.timer = setTimeout(() => {
       if (!st || st.dragging) return;
       st.fired = true;
@@ -402,6 +404,7 @@ function dragEngine(root, selector, o) {
         if (DRAG.renderPending) { DRAG.renderPending = false; render(); }
       });
     } else if (s.armed && !s.mouse && s.fired) o.onArmRelease?.(s);
+    else if (!s.fired && o.onTap) { suppressClick = true; o.onTap(s); }
     setTimeout(() => { suppressClick = false; }, 350);
   };
   window.addEventListener('pointerup', end);
@@ -857,6 +860,7 @@ function fillEditor(it) {
   ed.body.innerHTML = it.data.html || '';
   ed.root.className = 'editor c-' + (it.data.color || 'default');
   updateEditorMeta(it);
+  relayout();
 }
 function updateEditorMeta(it = S.items.get(S.editing)) {
   if (!it) return;
@@ -1023,6 +1027,7 @@ $('#edTools').addEventListener('click', (e) => {
   const b = e.target.closest('[data-cmd]'); if (!b) return;
   const cmd = b.dataset.cmd;
   if (cmd === 'checklist') { restoreRange(); return toggleChecklist(); }
+  if (cmd === 'block') return createBlock();
   if (cmd === 'image') return $('#imgInput').click();
   if (cmd === 'draw') return openDraw();
   if (cmd === 'text') return textStyleMenu();
@@ -1101,6 +1106,140 @@ function editorMore() {
     updateEditorMeta(); render();
   });
 }
+
+/* ================= Blocs déplaçables dans une note =================
+   Un bloc = <div class="nb" data-c="couleur"> … </div> au premier niveau de la note.
+   Poignée ⠿ en haut à droite : glisser pour le déplacer, toucher pour le menu. */
+const BLOCK_COLORS = ['default', 'yellow', 'orange', 'pink', 'purple', 'blue', 'green', 'gray'];
+const blkLayer = $('#blkLayer');
+const topLevel = (node) => { let n = node?.nodeType === 1 ? node : node?.parentElement; while (n && n.parentElement !== ed.body) n = n.parentElement; return n && ed.body.contains(n) ? n : null; };
+function layoutBlocks() {
+  if (ed.root.hidden) return;
+  const blocks = [...ed.body.children].filter((c) => c.classList.contains('nb'));
+  blkLayer.innerHTML = blocks.map((b, i) =>
+    `<button class="blk-h" data-i="${i}" title="Déplacer (glisser) · Options (toucher)" style="top:${b.offsetTop + 6}px;left:${b.offsetLeft + b.offsetWidth - 38}px">
+      <svg viewBox="0 0 24 24"><path d="M9 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm0 7.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zm-1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM18 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zM16.5 13.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM18 19.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/></svg></button>`).join('');
+}
+const relayout = () => requestAnimationFrame(layoutBlocks);
+ed.body.addEventListener('input', relayout);
+ed.body.addEventListener('load', relayout, true); // images chargées
+window.addEventListener('resize', relayout);
+function normalizeTop() { // texte « nu » au premier niveau → ligne <div>
+  for (const nd of [...ed.body.childNodes]) {
+    if (nd.nodeType === 3 && nd.textContent.trim() === '' && nd.textContent.indexOf('\u00a0') < 0) { nd.remove(); continue; }
+    if (nd.nodeType === 3 || (nd.nodeType === 1 && ['B', 'I', 'U', 'S', 'STRIKE', 'SPAN', 'FONT', 'A', 'BR'].includes(nd.tagName))) {
+      const d = document.createElement('div'); nd.before(d);
+      let x = d.nextSibling;
+      while (x && (x.nodeType === 3 || ['B', 'I', 'U', 'S', 'STRIKE', 'SPAN', 'FONT', 'A'].includes(x.tagName))) { const nx = x.nextSibling; d.appendChild(x); x = nx; }
+      if (x && x.tagName === 'BR') x.remove();
+      if (!d.firstChild) d.innerHTML = '<br>';
+    }
+  }
+}
+const blockAt = (i) => [...ed.body.children].filter((c) => c.classList.contains('nb'))[+i];
+
+function placeCaretIn(el, atEnd = true) {
+  const r = document.createRange(); r.selectNodeContents(el); r.collapse(!atEnd);
+  const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+}
+// Créer un bloc : encadre les lignes sélectionnées (ou la ligne courante), ou un bloc vide
+function createBlock() {
+  restoreRange();
+  { const sel = getSelection(), an = sel.anchorNode, ao = sel.anchorOffset, fn = sel.focusNode, fo = sel.focusOffset;
+    normalizeTop(); try { sel.setBaseAndExtent(an, ao, fn, fo); } catch {} }
+  const sel = getSelection();
+  if (closestInBody('.nb')) return blockMenu(closestInBody('.nb'));
+  let a = topLevel(sel.anchorNode), b = topLevel(sel.focusNode);
+  if (sel.anchorNode === ed.body) a = b = ed.body.children[Math.max(0, sel.anchorOffset - 1)] || null;
+  // texte « nu » au premier niveau : l'envelopper d'abord dans une ligne
+  if (a && a.nodeType === 3) { const d = document.createElement('div'); a.before(d); d.appendChild(a); a = b = d; }
+  const blk = document.createElement('div'); blk.className = 'nb'; blk.dataset.c = 'default';
+  if (!a || (ed.body.textContent.trim() === '' && !ed.body.querySelector('img'))) {
+    ed.body.innerHTML = ''; blk.innerHTML = '<div><br></div>'; ed.body.appendChild(blk);
+    ed.body.appendChild(Object.assign(document.createElement('div'), { innerHTML: '<br>' }));
+  } else {
+    if (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_PRECEDING) [a, b] = [b, a];
+    const els = []; for (let n = a; n; n = n.nextSibling) { els.push(n); if (n === b) break; }
+    a.before(blk);
+    for (const el of els) {
+      if (el.nodeType === 1 && el.classList.contains('nb')) { while (el.firstChild) blk.appendChild(el.firstChild); el.remove(); }
+      else if (el.nodeType === 3) { const d = document.createElement('div'); d.appendChild(el); blk.appendChild(d); }
+      else blk.appendChild(el);
+    }
+    if (!blk.nextElementSibling) blk.after(Object.assign(document.createElement('div'), { innerHTML: '<br>' }));
+  }
+  placeCaretIn(blk.lastElementChild || blk);
+  saveRange(); markDirty(); relayout();
+}
+// Entrée sur une ligne vide en fin de bloc : sortir du bloc
+ed.body.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  const blk = closestInBody('.nb'); if (!blk || closestInBody('li')) return;
+  const line = topLevelInBlock(getSelection().anchorNode, blk);
+  if (line && line === blk.lastElementChild && line.textContent === '' && !line.querySelector('img') && blk.children.length > 1) {
+    e.preventDefault();
+    line.remove();
+    const d = document.createElement('div'); d.innerHTML = '<br>'; blk.after(d); placeCaretIn(d, false);
+    markDirty(); relayout();
+  }
+});
+function topLevelInBlock(node, blk) { let n = node?.nodeType === 1 ? node : node?.parentElement; while (n && n.parentElement !== blk) n = n.parentElement; return n; }
+
+function blockMenu(blk) {
+  const sw = (c) => `<button class="sw${(blk.dataset.c || 'default') === c ? ' active' : ''}" data-col="${c}" style="background:${c === 'default' ? 'var(--surface-2)' : `var(--n-${c})`}"></button>`;
+  openSheet(`<h3>Bloc</h3><div class="drawer-label">Couleur</div><div class="sheet-row">${BLOCK_COLORS.map(sw).join('')}</div>
+    <button class="sheet-item" data-a="up">${ic('back')}<span>Monter</span></button>
+    <button class="sheet-item" data-a="down">${ic('back')}<span>Descendre</span></button>
+    <button class="sheet-item" data-a="dup">${ic('copy')}<span>Dupliquer</span></button>
+    <button class="sheet-item" data-a="unwrap">${ic('close')}<span>Retirer le cadre (garder le contenu)</span></button>
+    <button class="sheet-item danger" data-a="del">${ic('trash')}<span>Supprimer le bloc</span></button>`,
+  async (e) => {
+    const col = e.target.closest('[data-col]');
+    if (col) { blk.dataset.c = col.dataset.col; closeSheet(); markDirty(); return; }
+    const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
+    closeSheet();
+    if (a === 'up' && blk.previousElementSibling) blk.previousElementSibling.before(blk);
+    if (a === 'down' && blk.nextElementSibling) blk.nextElementSibling.after(blk);
+    if (a === 'dup') blk.after(blk.cloneNode(true));
+    if (a === 'unwrap') { while (blk.firstChild) blk.before(blk.firstChild); blk.remove(); }
+    if (a === 'del') { if (!(await confirmBox('Supprimer ce bloc et son contenu ?', '', 'Supprimer'))) return; blk.remove(); }
+    markDirty(); relayout();
+  });
+  // flèches haut/bas
+  const icons = $$('#sheetCard [data-a="up"] svg, #sheetCard [data-a="down"] svg');
+  icons[0].style.transform = 'rotate(90deg)'; icons[1].style.transform = 'rotate(-90deg)';
+}
+
+// Glisser un bloc par sa poignée
+dragEngine(blkLayer, '.blk-h', {
+  immediate: true,
+  key: (el) => el.dataset.i,
+  onTap(st) { const b = blockAt(st.key); if (b) blockMenu(b); },
+  onStart(st, e) {
+    const b = blockAt(st.key); if (!b) return false;
+    normalizeTop();
+    st.blk = b; st.ghost = makeGhost(b, e.clientX, e.clientY); b.classList.add('drag-src');
+    st.line = Object.assign(document.createElement('div'), { className: 'blk-drop' }); blkLayer.appendChild(st.line);
+  },
+  onMove(st, x, y) {
+    st.ghost.move(x, y); autoScroll.set(y, $('#edScroll'));
+    const kids = [...ed.body.children].filter((c) => c !== st.blk);
+    let before = null;
+    for (const k of kids) { const r = k.getBoundingClientRect(); if (y < r.top + r.height / 2) { before = k; break; } }
+    st.before = before;
+    const ref = before || kids.at(-1);
+    const top = !ref ? 0 : before ? before.offsetTop - 4 : ref.offsetTop + ref.offsetHeight + 2;
+    Object.assign(st.line.style, { top: top + 'px', left: ed.body.offsetLeft + 'px', width: ed.body.offsetWidth + 'px' });
+  },
+  onEnd(st, x, y, cancelled) {
+    autoScroll.stop(); st.ghost?.remove(); st.line?.remove(); st.blk.classList.remove('drag-src');
+    if (!cancelled && st.before !== st.blk.nextElementSibling) {
+      if (st.before) st.before.before(st.blk); else ed.body.appendChild(st.blk);
+      markDirty();
+    }
+    relayout();
+  },
+});
 
 /* ================= Dessin à main levée ================= */
 const D = { strokes: [], redo: [], tool: 'pen', color: '#1a1a1a', size: 3, cur: null, penSeen: false, dpr: 1, base: $('#drawBase'), live: $('#drawLive') };
