@@ -11,7 +11,7 @@ PORT="${CARNET_PORT:-3000}"
 NODE_MAJOR=24
 APP_DIR=/opt/carnet
 DATA_DIR=/var/lib/carnet
-export DEBIAN_FRONTEND=noninteractive
+export DEBIAN_FRONTEND=noninteractive LC_ALL=C.UTF-8 LANG=C.UTF-8
 
 GN="\033[1;92m"; BL="\033[36m"; RD="\033[01;31m"; CL="\033[m"
 msg() { echo -e " ${BL}➜${CL} $*"; }
@@ -39,6 +39,8 @@ mkdir -p "$APP_DIR" "$DATA_DIR/backups" /etc/carnet
 TMP=$(mktemp -d)
 curl -fsSL "https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}" | tar xz --strip-components=1 -C "$TMP"
 rm -rf "${APP_DIR:?}"/*; cp -a "$TMP"/. "$APP_DIR"/; rm -rf "$TMP"
+# mktemp crée un dossier en 0700 : cp -a le recopie sur /opt/carnet → illisible pour l'utilisateur carnet
+chown -R root:root "$APP_DIR"; chmod -R u=rwX,go=rX "$APP_DIR"
 chown -R carnet:carnet "$DATA_DIR"
 ok "Carnet $(cat "$APP_DIR/VERSION")"
 

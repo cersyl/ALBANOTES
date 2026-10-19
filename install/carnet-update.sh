@@ -4,6 +4,7 @@
 #  Options : --force  réinstalle même si la version est identique
 # =============================================================================
 set -Eeuo pipefail
+export LC_ALL=C.UTF-8 LANG=C.UTF-8
 GN="\033[1;92m"; BL="\033[36m"; YW="\033[33m"; RD="\033[01;31m"; CL="\033[m"
 msg() { echo -e " ${BL}➜${CL} $*"; }
 ok()  { echo -e " ${GN}✔${CL} $*"; }
@@ -29,6 +30,7 @@ curl -fsSL "https://codeload.github.com/${CARNET_REPO}/tar.gz/refs/heads/${CARNE
 systemctl stop carnet
 rm -rf "${APP_DIR:?}.old"; mv "$APP_DIR" "${APP_DIR}.old"; mkdir -p "$APP_DIR"
 cp -a "$TMP"/. "$APP_DIR"/
+chown -R root:root "$APP_DIR"; chmod -R u=rwX,go=rX "$APP_DIR"
 systemctl start carnet
 
 for _ in $(seq 1 20); do curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1 && break; sleep 0.5; done
