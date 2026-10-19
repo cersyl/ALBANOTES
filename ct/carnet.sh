@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  Carnet — création d'un LXC sur Proxmox VE (à lancer sur l'hôte PVE)
+#  ALBANOTES (projet carnet) — création d'un LXC sur Proxmox VE (à lancer sur l'hôte PVE)
 #  bash -c "$(curl -fsSL https://raw.githubusercontent.com/<user>/carnet/main/ct/carnet.sh)"
 #  Si lancé DANS le conteneur Carnet : met l'application à jour.
 # =============================================================================
@@ -9,7 +9,7 @@ set -Eeuo pipefail
 REPO="${CARNET_REPO:-cersyl/carnet}"
 BRANCH="${CARNET_BRANCH:-main}"
 RAW="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
-APP="Carnet"
+APP="ALBANOTES"
 
 YW="\033[33m"; GN="\033[1;92m"; RD="\033[01;31m"; BL="\033[36m"; CL="\033[m"
 msg()  { echo -e " ${BL}➜${CL} $*"; }
@@ -20,11 +20,11 @@ trap 'die "Erreur ligne $LINENO : $BASH_COMMAND"' ERR
 header() {
   clear
   cat <<'EOF'
-   ____                     _
-  / ___|__ _ _ __ _ __   ___| |_
- | |   / _` | '__| '_ \ / _ \ __|
- | |__| (_| | |  | | | |  __/ |_
-  \____\__,_|_|  |_| |_|\___|\__|   notes auto-hébergées
+     _    _     ____    _    _   _  ___ _____ _____ ____
+    / \  | |   | __ )  / \  | \ | |/ _ \_   _| ____/ ___|
+   / _ \ | |   |  _ \ / _ \ |  \| | | | || | |  _| \___ \
+  / ___ \| |___| |_) / ___ \| |\  | |_| || | | |___ ___) |
+ /_/   \_\_____|____/_/   \_\_| \_|\___/ |_| |_____|____/
 EOF
   echo
 }
@@ -43,7 +43,7 @@ WT() { whiptail --backtitle "Proxmox VE — ${APP}" "$@" 3>&1 1>&2 2>&3; }
 
 # --- Valeurs par défaut ------------------------------------------------------
 CTID=$(pvesh get /cluster/nextid)
-CT_HOSTNAME="carnet"
+CT_HOSTNAME="albanotes"
 DISK=4
 RAM=512
 CORES=1
@@ -74,7 +74,7 @@ fi
 pct status "$CTID" >/dev/null 2>&1 && die "L'ID $CTID est déjà utilisé."
 
 while :; do
-  PW1=$(WT --passwordbox "Mot de passe de connexion à Carnet (4 caractères min.)" 9 58) || exit 1
+  PW1=$(WT --passwordbox "Mot de passe de connexion à ALBANOTES (4 caractères min.)" 9 58) || exit 1
   PW2=$(WT --passwordbox "Confirmez le mot de passe" 9 58) || exit 1
   [[ "$PW1" == "$PW2" && ${#PW1} -ge 4 ]] && break
   WT --msgbox "Les mots de passe ne correspondent pas ou sont trop courts." 8 58
@@ -100,7 +100,7 @@ pct create "$CTID" "${TSTORAGE}:vztmpl/${TEMPLATE}" \
   --hostname "$CT_HOSTNAME" --cores "$CORES" --memory "$RAM" --swap 512 \
   --rootfs "${STORAGE}:${DISK}" --net0 "$NET0" \
   --unprivileged 1 --features nesting=1 --onboot 1 --ostype debian \
-  --tags carnet --description "<div align='center'><h2>Carnet</h2><p>Notes auto-hébergées</p><p><code>update</code> dans la console pour mettre à jour</p></div>" >/dev/null
+  --tags albanotes --description "<div align='center'><h2>ALBANOTES</h2><p>Notes auto-hébergées</p><p><code>update</code> dans la console pour mettre à jour</p></div>" >/dev/null
 ok "Conteneur créé"
 
 pct start "$CTID"
@@ -117,7 +117,7 @@ TMPPW=$(mktemp); chmod 600 "$TMPPW"; printf '%s\n' "$PW1" >"$TMPPW"
 pct push "$CTID" "$TMPPW" /root/.carnet-pass --perms 600
 rm -f "$TMPPW"; unset PW1 PW2
 
-msg "Installation de Carnet dans le conteneur (2-3 min)…"
+msg "Installation d'ALBANOTES dans le conteneur (2-3 min)…"
 pct exec "$CTID" -- env LC_ALL=C.UTF-8 LANG=C.UTF-8 bash -c "apt-get update -qq >/dev/null && apt-get install -y -qq curl ca-certificates >/dev/null"
 pct exec "$CTID" -- env LC_ALL=C.UTF-8 LANG=C.UTF-8 CARNET_REPO="$REPO" CARNET_BRANCH="$BRANCH" CARNET_PORT="$PORT" \
   bash -c "curl -fsSL '${RAW}/install/carnet-install.sh' | bash"
