@@ -368,6 +368,7 @@ $('#notes').addEventListener('contextmenu', (e) => {
 /* ================= Glisser-déposer =================
    Souris : cliquer-glisser. Tactile/stylet : appui long (la note se sélectionne), puis glisser sans lever le doigt. */
 function dragEngine(root, selector, o) {
+  if (!root) { console.warn('ALBANOTES : élément absent pour', selector); return; }
   let st = null, suppressClick = false;
   root.addEventListener('pointerdown', (e) => {
     const el = e.target.closest(selector);
@@ -1114,7 +1115,7 @@ const BLOCK_COLORS = ['default', 'yellow', 'orange', 'pink', 'purple', 'blue', '
 const blkLayer = $('#blkLayer');
 const topLevel = (node) => { let n = node?.nodeType === 1 ? node : node?.parentElement; while (n && n.parentElement !== ed.body) n = n.parentElement; return n && ed.body.contains(n) ? n : null; };
 function layoutBlocks() {
-  if (ed.root.hidden) return;
+  if (ed.root.hidden || !blkLayer) return;
   const blocks = [...ed.body.children].filter((c) => c.classList.contains('nb'));
   blkLayer.innerHTML = blocks.map((b, i) =>
     `<button class="blk-h" data-i="${i}" title="Déplacer (glisser) · Options (toucher)" style="top:${b.offsetTop + 6}px;left:${b.offsetLeft + b.offsetWidth - 38}px">
@@ -1428,6 +1429,12 @@ function registerSW() {
   });
 }
 
+// Filet de sécurité : si une erreur empêche l'affichage, le dire au lieu d'une page vide
+window.addEventListener('error', (e) => {
+  if (document.querySelector('.card, #login:not([hidden])')) return;
+  document.body.insertAdjacentHTML('beforeend', `<div style="position:fixed;inset:auto 16px 16px;z-index:999;background:#d93b3b;color:#fff;padding:14px 18px;border-radius:16px;font:14px system-ui">
+    ALBANOTES n'a pas pu démarrer (${String(e.message).replace(/[<>&]/g, '')}). Fichiers incomplets sur le serveur ? Lancez « update --force ».</div>`);
+});
 async function init() {
   hydrateIcons();
   applyTheme();
