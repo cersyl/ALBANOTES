@@ -1,6 +1,6 @@
 'use strict';
 /*
- * Carnet — serveur de notes auto-hébergé
+ * ALBANOTES — serveur de notes auto-hébergé
  * Zéro dépendance : Node >= 22 (http + node:sqlite + crypto)
  */
 const http = require('node:http');
@@ -267,7 +267,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Carnet ${VERSION} — http://${HOST}:${PORT} — données : ${DATA_DIR}`);
+  console.log(`ALBANOTES ${VERSION} — http://${HOST}:${PORT} — données : ${DATA_DIR}`);
   if (!getKV('password')) console.warn('ATTENTION : aucun mot de passe défini (carnet passwd).');
 });
 
