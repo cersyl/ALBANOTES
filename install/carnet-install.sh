@@ -128,6 +128,16 @@ systemctl restart carnet
 for _ in $(seq 1 20); do curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1 && break; sleep 0.5; done
 curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null && ok "Service actif sur le port ${PORT}"
 
+# Console Proxmox : connexion automatique en root (comme les helper-scripts)
+mkdir -p /etc/systemd/system/container-getty@1.service.d
+cat >/etc/systemd/system/container-getty@1.service.d/override.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin root --noclear --keep-baud tty%I 115200,38400,9600 $TERM
+EOF
+systemctl daemon-reload
+systemctl restart container-getty@1 2>/dev/null || true
+
 # Message d'accueil de la console
 cat >/etc/motd <<EOF
 
