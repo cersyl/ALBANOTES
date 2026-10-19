@@ -1423,10 +1423,14 @@ function registerSW() {
   // Recharger uniquement lors d'une mise à jour (pas à la toute première installation)
   const hadController = !!navigator.serviceWorker.controller;
   let reloading = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!hadController || reloading) return;
-    reloading = true; commitEditor().finally(() => location.reload());
-  });
+  // la nouvelle version est active : recharger dès que l'utilisateur n'écrit plus
+  const reloadWhenIdle = () => {
+    if (reloading) return;
+    if (busy()) { setTimeout(reloadWhenIdle, 1500); return; }
+    reloading = true; toast('Mise à jour d’ALBANOTES…', null, null, 2000);
+    commitEditor().finally(() => location.reload());
+  };
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) reloadWhenIdle(); });
 }
 
 // Filet de sécurité : si une erreur empêche l'affichage, le dire au lieu d'une page vide
@@ -1436,6 +1440,7 @@ window.addEventListener('error', (e) => {
     ALBANOTES n'a pas pu démarrer (${String(e.message).replace(/[<>&]/g, '')}). Fichiers incomplets sur le serveur ? Lancez « update --force ».</div>`);
 });
 async function init() {
+  try { registerSW(); } catch {}
   hydrateIcons();
   applyTheme();
   for (const it of await DB.all()) S.items.set(it.id, it);
@@ -1454,6 +1459,5 @@ async function init() {
       newNote({ title: p.get('title') || '', html: text.split('\n').map((l) => `<div>${esc(l) || '<br>'}</div>`).join('') });
     } else newNote();
   }
-  registerSW();
 }
 init();
