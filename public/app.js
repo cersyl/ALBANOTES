@@ -137,7 +137,11 @@ const S = {
 };
 const notes = () => [...S.items.values()].filter((i) => i.type === 'note' && !i.deleted);
 const folders = () => [...S.items.values()].filter((i) => i.type === 'folder' && !i.deleted)
-  .sort((a, b) => a.data.name.localeCompare(b.data.name, 'fr', { sensitivity: 'base' }));
+  .sort((a, b) => (a.data.order ?? 1e15) - (b.data.order ?? 1e15) || a.data.name.localeCompare(b.data.name, 'fr', { sensitivity: 'base' }));
+const editedAt = (n) => n.data.edited_at || n.updated_at;
+const DRAG = { active: false, renderPending: false };
+let lastPointer = 'mouse';
+document.addEventListener('pointerdown', (e) => { lastPointer = e.pointerType; }, true);
 const folderById = (id) => { const f = S.items.get(id); return f && f.type === 'folder' && !f.deleted ? f : null; };
 
 async function saveItem(item) {
@@ -240,7 +244,13 @@ function visibleNotes() {
     list = list.filter((n) => (n.data.title + '\n' + n.data.text).toLowerCase().includes(q));
   }
   const cmp = {
-    modified: (a, b) => b.updated_at - a.updated_at,
+    modified: (a, b) => editedAt(b) - editedAt(a),
+    custom: (a, b) => {
+      const oa = a.data.order, ob = b.data.order;
+      if (oa == null && ob == null) return editedAt(b) - editedAt(a);
+      if (oa == null) return -1; if (ob == null) return 1; // les notes sans rang (nouvelles) en tête
+      return oa - ob;
+    },
     created: (a, b) => (b.data.created_at || 0) - (a.data.created_at || 0),
     title: (a, b) => (a.data.title || a.data.text || '').localeCompare(b.data.title || b.data.text || '', 'fr', { sensitivity: 'base' }),
   }[S.sort];
@@ -259,7 +269,7 @@ function cardHtml(n) {
     ${img ? `<img class="c-thumb" src="${esc(img[1])}" alt="" loading="lazy">` : ''}
     <div class="c-prev">${esc(d.title ? preview : preview.split('\n').slice(1).join('\n'))}</div>
     <div class="c-foot">
-      <span>${fmtDate(S.sort === 'created' ? d.created_at || n.updated_at : n.updated_at)}</span>
+      <span>${fmtDate(S.sort === 'created' ? d.created_at || n.updated_at : editedAt(n))}</span>
       ${total ? `<span>· ☑ ${checked}/${total}</span>` : ''}
       ${folder ? `<span>· ${esc(folderEmoji(folder))} ${esc(folder.data.name)}</span>` : ''}
     </div>
@@ -268,6 +278,7 @@ function cardHtml(n) {
   </article>`;
 }
 function render() {
+  if (DRAG.active) { DRAG.renderPending = true; return; }
   const list = visibleNotes();
   const box = $('#notes');
   box.className = 'notes ' + S.layout;
@@ -295,7 +306,7 @@ function render() {
 function renderDrawer() {
   const all = notes().filter((n) => !n.data.trashed);
   const count = (f) => all.filter(f).length;
-  const item = (v, icon, label, n, folder) => `<div class="drawer-row"><button class="drawer-item${S.view === v ? ' active' : ''}" data-view="${esc(v)}">
+  const item = (v, icon, label, n, folder) => `<div class="drawer-row"${folder ? ` data-fid="${esc(v)}"` : ''}><button class="drawer-item${S.view === v ? ' active' : ''}" data-view="${esc(v)}">
       ${folder ? folderBadge(folder) : ic(icon)}<span>${esc(label)}</span><span class="n">${n ?? ''}</span></button>${folder ? `<button class="icon-btn fedit" data-fedit="${esc(v)}" title="Modifier">${svg('more')}</button>` : ''}</div>`;
   $('#drawerList').innerHTML =
     item('all', 'notes', 'Toutes les notes', all.length) +
@@ -327,36 +338,237 @@ $('#drawerList').addEventListener('click', (e) => {
   const b = e.target.closest('[data-view]'); if (b) setView(b.dataset.view);
 });
 $('#drawerList').addEventListener('contextmenu', (e) => {
+  if (lastPointer !== 'mouse') { e.preventDefault(); return; }
   const b = e.target.closest('[data-view]'); if (!b || !folderById(b.dataset.view)) return;
   e.preventDefault(); folderMenu(b.dataset.view);
 });
-// appui long sur un dossier (mobile)
-longPress($('#drawerList'), '[data-view]', (b) => { if (folderById(b.dataset.view)) folderMenu(b.dataset.view); });
 
 /* ================= Sélection multiple ================= */
 function enterSelection(id) { S.selecting = true; S.selected = new Set(id ? [id] : []); render(); }
+function selectionUI() {
+  $('#home').classList.toggle('selecting', S.selecting);
+  $$('#notes .card').forEach((c) => c.classList.toggle('selected', S.selected.has(c.dataset.id)));
+  $('#fab').hidden = S.view === 'trash' || S.selecting;
+  renderSelbar();
+}
 function exitSelection(doRender = true) { S.selecting = false; S.selected.clear(); if (doRender) render(); }
 function toggleSelect(id) { S.selected.has(id) ? S.selected.delete(id) : S.selected.add(id); if (!S.selected.size) return exitSelection(); render(); }
 
-function longPress(root, selector, fn) {
-  let timer, sx, sy, fired = false;
-  root.addEventListener('pointerdown', (e) => {
-    const el = e.target.closest(selector); if (!el || e.button > 0) return;
-    fired = false; sx = e.clientX; sy = e.clientY;
-    timer = setTimeout(() => { fired = true; navigator.vibrate?.(20); fn(el); }, 480);
-  });
-  const cancel = (e) => { if (e.type === 'pointermove' && Math.hypot(e.clientX - sx, e.clientY - sy) < 10) return; clearTimeout(timer); };
-  root.addEventListener('pointermove', cancel); root.addEventListener('pointerup', cancel); root.addEventListener('pointercancel', cancel);
-  root.addEventListener('click', (e) => { if (fired) { e.stopPropagation(); e.preventDefault(); fired = false; } }, true);
-}
-longPress($('#notes'), '.card', (c) => { S.selecting ? toggleSelect(c.dataset.id) : enterSelection(c.dataset.id); });
 $('#notes').addEventListener('click', (e) => {
   const c = e.target.closest('.card'); if (!c) return;
   if (S.selecting) toggleSelect(c.dataset.id); else openEditor(c.dataset.id);
 });
 $('#notes').addEventListener('contextmenu', (e) => {
+  if (lastPointer !== 'mouse') { e.preventDefault(); return; }
   const c = e.target.closest('.card'); if (!c) return;
   e.preventDefault(); S.selecting ? toggleSelect(c.dataset.id) : enterSelection(c.dataset.id);
+});
+
+/* ================= Glisser-déposer =================
+   Souris : cliquer-glisser. Tactile/stylet : appui long (la note se sélectionne), puis glisser sans lever le doigt. */
+function dragEngine(root, selector, o) {
+  let st = null, suppressClick = false;
+  root.addEventListener('pointerdown', (e) => {
+    const el = e.target.closest(selector);
+    if (!el || e.button > 0 || st || (o.canStart && !o.canStart(el))) return;
+    const mouse = e.pointerType === 'mouse';
+    st = { el, key: o.key(el), x: e.clientX, y: e.clientY, pid: e.pointerId, mouse, armed: mouse, dragging: false, fired: false };
+    st.timer = setTimeout(() => {
+      if (!st || st.dragging) return;
+      st.fired = true;
+      if (!mouse) { st.armed = true; navigator.vibrate?.(15); o.onArm?.(st); } else o.onLong?.(st);
+    }, mouse ? 500 : 420);
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!st || e.pointerId !== st.pid) return;
+    const d = Math.hypot(e.clientX - st.x, e.clientY - st.y);
+    if (!st.dragging) {
+      if (!st.armed) { if (d > 10) { clearTimeout(st.timer); st = null; } return; } // défilement tactile
+      if (d < 7) return;
+      clearTimeout(st.timer); st.fired = true;
+      if (o.onStart(st, e) === false) { st = null; return; }
+      st.dragging = true; DRAG.active = true; document.body.classList.add('is-dragging');
+    }
+    o.onMove(st, e.clientX, e.clientY);
+  });
+  const end = (e) => {
+    if (!st || e.pointerId !== st.pid) return;
+    clearTimeout(st.timer);
+    const s = st; st = null;
+    if (s.fired) suppressClick = true;
+    if (s.dragging) {
+      DRAG.active = false; document.body.classList.remove('is-dragging');
+      Promise.resolve(o.onEnd(s, e.clientX, e.clientY, e.type === 'pointercancel')).finally(() => {
+        if (DRAG.renderPending) { DRAG.renderPending = false; render(); }
+      });
+    } else if (s.armed && !s.mouse && s.fired) o.onArmRelease?.(s);
+    setTimeout(() => { suppressClick = false; }, 350);
+  };
+  window.addEventListener('pointerup', end);
+  window.addEventListener('pointercancel', end);
+  root.addEventListener('click', (e) => { if (suppressClick) { e.stopPropagation(); e.preventDefault(); suppressClick = false; } }, true);
+  // empêcher le défilement tactile une fois l'élément « saisi »
+  root.addEventListener('touchmove', (e) => { if (st?.armed) e.preventDefault(); }, { passive: false });
+  root.addEventListener('dragstart', (e) => e.preventDefault()); // pas de glisser natif des images
+}
+
+function makeGhost(el, x, y) {
+  const r = el.getBoundingClientRect();
+  const g = el.cloneNode(true);
+  g.classList.add('drag-ghost'); g.classList.remove('selected');
+  Object.assign(g.style, { width: r.width + 'px', height: r.height + 'px', left: '0px', top: '0px' });
+  document.body.appendChild(g);
+  const off = { x: x - r.left, y: y - r.top };
+  g.style.transformOrigin = `${off.x}px ${off.y}px`;
+  const move = (nx, ny, mini = false) => {
+    g.style.transform = `translate(${nx - off.x}px, ${ny - off.y - (mini ? 70 : 0)}px) rotate(1.5deg) scale(${mini ? 0.38 : 1.03})`;
+  };
+  move(x, y);
+  return { el: g, move, remove: () => g.remove() };
+}
+// défilement automatique près des bords
+const autoScroll = { y: 0, raf: 0, el: null,
+  set(y, el = document.scrollingElement) {
+    const H = el === document.scrollingElement ? innerHeight : el.getBoundingClientRect().bottom, T = el === document.scrollingElement ? 0 : el.getBoundingClientRect().top;
+    this.el = el; this.y = y < T + 70 ? -12 : y > H - 90 ? 12 : 0;
+    if (this.y && !this.raf) { const step = () => { if (!this.y) { this.raf = 0; return; } this.el.scrollBy(0, this.y); this.raf = requestAnimationFrame(step); }; this.raf = requestAnimationFrame(step); }
+  },
+  stop() { this.y = 0; },
+};
+function clearMarks(root) { root.querySelectorAll('.drop-before, .drop-after, .drop-over').forEach((x) => x.classList.remove('drop-before', 'drop-after', 'drop-over')); }
+
+/* ---- Notes : réordonner + ranger dans un dossier ---- */
+function displayedNotes() {
+  const list = visibleNotes();
+  if (S.view === 'trash') return list;
+  return [...list.filter((n) => n.data.pinned), ...list.filter((n) => !n.data.pinned)];
+}
+function showDropBar(ids) {
+  const cur = ids.length === 1 ? S.items.get(ids[0])?.data.folder ?? null : undefined;
+  const chip = (attr, inner, extra = '') => `<div class="drop-chip ${extra}" ${attr}>${inner}</div>`;
+  $('#dropBar').innerHTML = `<div class="drop-title">Ranger ${ids.length > 1 ? `${ids.length} notes` : 'la note'} dans…</div><div class="drop-chips">` +
+    folders().filter((f) => f.id !== cur).map((f) => chip(`data-drop="${esc(f.id)}"`, `${folderBadge(f)}<span>${esc(f.data.name)}</span>`)).join('') +
+    (cur !== null ? chip('data-drop=""', `${ic('notes')}<span>Aucun dossier</span>`) : '') +
+    chip('data-drop="__trash"', `${ic('trash')}<span>Corbeille</span>`, 'danger') + '</div>';
+  hydrateIcons($('#dropBar'));
+  $('#dropBar').hidden = false;
+}
+dragEngine($('#notes'), '.card', {
+  key: (el) => el.dataset.id,
+  onArm(st) { // appui long tactile : sélection sans redessiner la liste (le doigt reste sur la même carte)
+    st.autoSel = !S.selecting;
+    S.selecting = true; S.selected.add(st.key); selectionUI();
+  },
+  onLong(st) { st.autoSel = !S.selecting; if (!S.selecting) enterSelection(st.key); else toggleSelect(st.key); },
+  onStart(st, e) {
+    if (S.view === 'trash') return false;
+    const el = $(`#notes .card[data-id="${CSS.escape(st.key)}"]`); if (!el) return false;
+    st.ids = S.selecting && S.selected.has(st.key) ? [...S.selected] : [st.key];
+    st.ghost = makeGhost(el, e.clientX, e.clientY);
+    if (st.ids.length > 1) st.ghost.el.dataset.count = st.ids.length;
+    $$('#notes .card').forEach((c) => { if (st.ids.includes(c.dataset.id)) c.classList.add('drag-src'); });
+    $('#fab').hidden = true;
+    showDropBar(st.ids);
+  },
+  onMove(st, x, y) {
+    const barTop = $('#dropBar').getBoundingClientRect().top;
+    st.ghost.move(x, y, y > barTop - 60);
+    autoScroll.set(y > barTop - 60 ? innerHeight / 2 : y);
+    clearMarks(document);
+    st.target = null;
+    const under = document.elementFromPoint(x, y);
+    const chip = under?.closest('[data-drop]');
+    if (chip) { chip.classList.add('drop-over'); st.target = { folder: chip.dataset.drop }; return; }
+    const card = under?.closest('#notes .card');
+    if (card && !st.ids.includes(card.dataset.id) && st.ids.length === 1) {
+      const r = card.getBoundingClientRect();
+      const after = S.layout === 'grid' ? x > r.left + r.width / 2 : y > r.top + r.height / 2;
+      card.classList.add(after ? 'drop-after' : 'drop-before');
+      st.target = { card: card.dataset.id, after };
+    }
+  },
+  async onEnd(st, x, y, cancelled) {
+    autoScroll.stop(); st.ghost?.remove(); clearMarks(document);
+    $('#dropBar').hidden = true;
+    $$('.drag-src').forEach((c) => c.classList.remove('drag-src'));
+    const t = cancelled ? null : st.target;
+    if (t?.folder !== undefined) {
+      if (t.folder === '__trash') {
+        for (const id of st.ids) await updateNote(id, { trashed: true, trashed_at: Date.now(), pinned: false });
+        const ids = st.ids;
+        toast(`${ids.length} note(s) placée(s) dans la corbeille`, 'Annuler', async () => { for (const id of ids) await updateNote(id, { trashed: false, trashed_at: null }); render(); });
+      } else {
+        const fid = t.folder || null;
+        for (const id of st.ids) await updateNote(id, { folder: fid });
+        toast(fid ? `Rangée dans ${folderEmoji(folderById(fid))} ${folderById(fid)?.data.name}` : 'Retirée du dossier');
+      }
+      if (S.selecting) exitSelection(false);
+    } else if (t?.card) {
+      await reorderNote(st.key, t.card, t.after);
+      if (st.autoSel && S.selecting) exitSelection(false);
+    }
+    DRAG.renderPending = true;
+  },
+});
+async function reorderNote(id, targetId, after) {
+  if (S.sort !== 'custom') {
+    // passer en tri personnalisé en figeant l'ordre affiché
+    const shown = displayedNotes();
+    S.sort = 'custom'; pref.set('sort', 'custom');
+    toast('Tri personnalisé activé');
+    for (let i = 0; i < shown.length; i++) if (shown[i].data.order !== i * 1000) await updateNote(shown[i].id, { order: i * 1000 });
+  }
+  let list = displayedNotes();
+  if (list.some((n) => n.data.order == null)) { await normalizeOrder(list); list = displayedNotes(); }
+  const moving = S.items.get(id), target = S.items.get(targetId);
+  const rest = list.filter((n) => n.id !== id);
+  let idx = rest.findIndex((n) => n.id === targetId) + (after ? 1 : 0);
+  const prev = rest[idx - 1], next = rest[idx];
+  const order = prev && next ? (prev.data.order + next.data.order) / 2 : prev ? prev.data.order + 1000 : next ? next.data.order - 1000 : 0;
+  const patch = { order };
+  if (S.view !== 'trash' && !!moving.data.pinned !== !!target.data.pinned) patch.pinned = !!target.data.pinned;
+  await updateNote(id, patch);
+}
+async function normalizeOrder(list) {
+  // attribue des rangs espacés en conservant l'ordre affiché, sans toucher aux notes déjà bien placées
+  let last = -Infinity;
+  for (let i = 0; i < list.length; i++) {
+    const n = S.items.get(list[i].id), o = n.data.order;
+    if (o != null && o > last) { last = o; continue; }
+    const nextO = list.slice(i + 1).map((x) => S.items.get(x.id).data.order).find((v) => v != null && v > last);
+    const val = last === -Infinity ? (nextO != null ? nextO - 1000 : i * 1000) : nextO != null ? (last + nextO) / 2 : last + 1000;
+    await updateNote(n.id, { order: val });
+    last = val;
+  }
+}
+
+/* ---- Dossiers : réordonner dans le menu latéral ---- */
+dragEngine($('#drawerList'), '.drawer-row[data-fid]', {
+  key: (el) => el.dataset.fid,
+  onArmRelease(st) { folderMenu(st.key); }, // appui long sans bouger : modifier le dossier
+  onStart(st, e) {
+    const el = $(`#drawerList .drawer-row[data-fid="${CSS.escape(st.key)}"]`); if (!el) return false;
+    st.ghost = makeGhost(el, e.clientX, e.clientY); el.classList.add('drag-src');
+  },
+  onMove(st, x, y) {
+    st.ghost.move(x, y); autoScroll.set(y, $('#drawerList'));
+    clearMarks($('#drawerList')); st.target = null;
+    const row = document.elementFromPoint(x, y)?.closest('#drawerList .drawer-row[data-fid]');
+    if (row && row.dataset.fid !== st.key) {
+      const r = row.getBoundingClientRect(), after = y > r.top + r.height / 2;
+      row.classList.add(after ? 'drop-after' : 'drop-before'); st.target = { id: row.dataset.fid, after };
+    }
+  },
+  async onEnd(st, x, y, cancelled) {
+    autoScroll.stop(); st.ghost?.remove(); clearMarks($('#drawerList'));
+    $$('#drawerList .drag-src').forEach((c) => c.classList.remove('drag-src'));
+    if (cancelled || !st.target) return;
+    const list = folders().filter((f) => f.id !== st.key);
+    const idx = list.findIndex((f) => f.id === st.target.id) + (st.target.after ? 1 : 0);
+    list.splice(idx, 0, S.items.get(st.key));
+    for (let i = 0; i < list.length; i++) if (list[i].data.order !== i * 1000) await saveItem({ ...list[i], data: { ...list[i].data, order: i * 1000 } });
+    DRAG.renderPending = true;
+  },
 });
 
 /* ================= Feuilles (menus, dialogues) ================= */
@@ -481,7 +693,7 @@ function folderEditor(f) {
 async function createFolder() {
   const r = await folderEditor(null);
   if (!r || r === 'delete') return null;
-  return saveItem({ id: uid(), type: 'folder', deleted: false, data: r });
+  return saveItem({ id: uid(), type: 'folder', deleted: false, data: { ...r, order: Math.max(0, ...folders().map((f) => f.data.order ?? 0)) + 1000 } });
 }
 async function folderMenu(id) {
   const f = folderById(id); if (!f) return;
@@ -530,7 +742,7 @@ async function selectionAction(a) {
 
 function sortMenu() {
   const opt = (v, l) => `<button class="sheet-item${S.sort === v ? ' active' : ''}" data-s="${v}">${ic('sort')}<span>${l}</span></button>`;
-  openSheet(`<h3>Trier par</h3>${opt('modified', 'Date de modification')}${opt('created', 'Date de création')}${opt('title', 'Titre')}`,
+  openSheet(`<h3>Trier par</h3>${opt('custom', 'Personnalisé (glisser-déposer)')}${opt('modified', 'Date de modification')}${opt('created', 'Date de création')}${opt('title', 'Titre')}<p class="muted">Astuce : maintenez une note (ou cliquez-glissez à la souris) pour la déplacer ou la ranger dans un dossier.</p>`,
     (e) => { const b = e.target.closest('[data-s]'); if (b) { S.sort = b.dataset.s; pref.set('sort', S.sort); closeSheet(); render(); } });
 }
 
@@ -625,7 +837,7 @@ const commitDebounced = debounce(() => commitEditor(), 500);
 function newNote(prefill = {}) {
   const folder = !['all', 'fav', 'trash'].includes(S.view) ? S.view : null;
   const it = { id: uid(), type: 'note', deleted: false, updated_at: Date.now(), dirty: false,
-    data: { title: '', html: '', text: '', folder, color: 'default', fav: S.view === 'fav', pinned: false, trashed: false, created_at: Date.now(), ...prefill } };
+    data: { title: '', html: '', text: '', order: Math.min(0, ...notes().map((n) => n.data.order ?? 0)) - 1000, folder, color: 'default', fav: S.view === 'fav', pinned: false, trashed: false, created_at: Date.now(), ...prefill } };
   S.items.set(it.id, it);
   openEditor(it.id, true);
   if (prefill.html) { S.edPending = true; commitEditor(); }
@@ -651,7 +863,7 @@ function updateEditorMeta(it = S.items.get(S.editing)) {
   setIcon($('#edFavIcon'), it.data.fav ? 'star' : 'starO');
   $('[data-action="ed-fav"]').classList.toggle('on', !!it.data.fav);
   { const f = folderById(it.data.folder); $('#edFolder').textContent = f ? `${folderEmoji(f)} ${f.data.name}` : 'Aucun dossier'; }
-  $('#edDate').textContent = S.edSaved ? 'Modifiée ' + fmtFull(it.updated_at) : '';
+  $('#edDate').textContent = S.edSaved ? 'Modifiée ' + fmtFull(editedAt(it)) : '';
 }
 function refreshEditorFromRemote() {
   const it = S.items.get(S.editing);
@@ -672,7 +884,7 @@ async function commitEditor() {
   if (title === it.data.title && html === it.data.html) return;
   const text = ed.body.innerText.replace(/ /g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);
   if (!S.edSaved && !title && !text && !/<img/.test(html)) return; // note neuve encore vide
-  await saveItem({ ...it, data: { ...it.data, title, html, text } });
+  await saveItem({ ...it, data: { ...it.data, title, html, text, edited_at: Date.now() } });
   S.edSaved = true;
   updateEditorMeta();
   render();
@@ -1043,18 +1255,30 @@ async function purgeTrash() {
   for (const n of notes()) if (n.data.trashed && (n.data.trashed_at || 0) < limit) await tombstone(n.id);
 }
 
+/* Mises à jour automatiques : la nouvelle version s'applique dès que l'utilisateur
+   n'est pas en train d'écrire (éditeur, dessin ou menu fermés). */
+let pendingWorker = null;
+const busy = () => !ed.root.hidden || !$('#draw').hidden || !$('#sheet').hidden;
+function tryApplyUpdate() {
+  if (!pendingWorker || busy()) return;
+  const w = pendingWorker; pendingWorker = null;
+  toast('Mise à jour d’ALBANOTES…', null, null, 2000);
+  w.postMessage('skipWaiting');
+}
 function registerSW() {
   if (!('serviceWorker' in navigator)) return;
   navigator.serviceWorker.register('/sw.js').then((reg) => {
+    const offer = (w) => { if (w && navigator.serviceWorker.controller) { pendingWorker = w; tryApplyUpdate(); } };
+    if (reg.waiting) offer(reg.waiting); // version déjà téléchargée lors d'une session précédente
     reg.addEventListener('updatefound', () => {
       const w = reg.installing;
-      w?.addEventListener('statechange', () => {
-        if (w.state === 'installed' && navigator.serviceWorker.controller) {
-          toast('Nouvelle version disponible', 'Recharger', () => w.postMessage('skipWaiting'), 30000);
-        }
-      });
+      w?.addEventListener('statechange', () => { if (w.state === 'installed') offer(w); });
     });
-    setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+    const check = () => reg.update().catch(() => {});
+    setInterval(check, 15 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+    // appliquer dès la fermeture de l'éditeur / du dessin / d'un menu
+    new MutationObserver(tryApplyUpdate).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['hidden'] });
   }).catch(() => {});
   // Recharger uniquement lors d'une mise à jour (pas à la toute première installation)
   const hadController = !!navigator.serviceWorker.controller;

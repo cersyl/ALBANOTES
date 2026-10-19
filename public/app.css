@@ -237,3 +237,27 @@ i[data-i] svg { width: 100%; height: 100%; fill: currentColor; }
 .drawer-item span.femoji { flex: none; overflow: visible; }
 .drawer-item span.femoji + span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-row .drawer-item .n { margin-right: 2px; }
+
+/* ---------- Glisser-déposer ---------- */
+.is-dragging, .is-dragging * { cursor: grabbing !important; user-select: none !important; }
+.card img, .drawer-row { -webkit-user-drag: none; }
+.drag-ghost { position: fixed !important; z-index: 100; pointer-events: none; margin: 0 !important; opacity: .95;
+  box-shadow: 0 14px 34px rgba(0,0,0,.28) !important; transition: transform .12s ease-out !important; will-change: transform; }
+.drag-ghost[data-count]::after { content: attr(data-count); position: absolute; top: -8px; right: -8px; min-width: 26px; height: 26px; padding: 0 6px;
+  border-radius: 13px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 700; display: grid; place-items: center; }
+.drawer-row.drag-ghost { background: var(--surface); border-radius: 16px; }
+.drag-src { opacity: .3; }
+.grid .card.drop-before { box-shadow: inset 5px 0 0 var(--accent), var(--shadow); }
+.grid .card.drop-after { box-shadow: inset -5px 0 0 var(--accent), var(--shadow); }
+.list .card.drop-before, .drawer-row.drop-before { box-shadow: inset 0 4px 0 var(--accent); }
+.list .card.drop-after, .drawer-row.drop-after { box-shadow: inset 0 -4px 0 var(--accent); }
+.drawer-row { border-radius: 16px; }
+.drop-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 90; background: var(--surface); border-radius: 24px 24px 0 0;
+  box-shadow: 0 -6px 24px rgba(0,0,0,.15); padding: 12px 12px max(14px, env(safe-area-inset-bottom)); animation: up .15s ease; }
+.drop-title { font-size: 13px; color: var(--text-2); padding: 0 6px 8px; }
+.drop-chips { display: flex; flex-wrap: wrap; gap: 8px; max-height: 32vh; overflow: auto; }
+.drop-chip { display: flex; align-items: center; gap: 8px; padding: 6px 14px 6px 6px; border-radius: 999px; background: var(--surface-2); font-size: 14px; transition: transform .1s, background .1s; }
+.drop-chip i[data-i] { width: 30px; height: 30px; padding: 4px; }
+.drop-chip.danger { color: #d93b3b; }
+.drop-chip.drop-over { background: var(--accent); color: #fff; transform: scale(1.06); }
+.drop-chip.danger.drop-over { background: #d93b3b; }
