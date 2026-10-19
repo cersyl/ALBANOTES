@@ -118,8 +118,8 @@ pct push "$CTID" "$TMPPW" /root/.carnet-pass --perms 600
 rm -f "$TMPPW"; unset PW1 PW2
 
 msg "Installation de Carnet dans le conteneur (2-3 min)…"
-pct exec "$CTID" -- bash -c "apt-get update -qq >/dev/null && apt-get install -y -qq curl ca-certificates >/dev/null"
-pct exec "$CTID" -- env CARNET_REPO="$REPO" CARNET_BRANCH="$BRANCH" CARNET_PORT="$PORT" \
+pct exec "$CTID" -- env LC_ALL=C.UTF-8 LANG=C.UTF-8 bash -c "apt-get update -qq >/dev/null && apt-get install -y -qq curl ca-certificates >/dev/null"
+pct exec "$CTID" -- env LC_ALL=C.UTF-8 LANG=C.UTF-8 CARNET_REPO="$REPO" CARNET_BRANCH="$BRANCH" CARNET_PORT="$PORT" \
   bash -c "curl -fsSL '${RAW}/install/carnet-install.sh' | bash"
 
 IP=$(pct exec "$CTID" -- hostname -I | awk '{print $1}')
