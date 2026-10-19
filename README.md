@@ -5,6 +5,7 @@ ALBANOTES : prise de notes rapide façon Samsung Notes, auto-hébergée, synchro
 - **Notes riches** : titre, gras/italique/souligné/barré, titres, couleurs et surlignage, listes à puces/numérotées, **listes de tâches cochables**, séparateurs, alignement
 - **Dessin à main levée** (stylet avec pression, surligneur, gomme, rejet de la paume) et **images** (collage, glisser-déposer, galerie/appareil photo)
 - **Couleurs de note**, épinglage, favoris, **dossiers** colorés avec émoticônes (Maison, Bureau, Loisirs, Vie perso, Divers…), recherche, tri, grille/liste, sélection multiple (appui long)
+- **Page libre (style OneNote)** : bouton ▦ de la barre d'outils — touchez n'importe où pour créer un bloc de texte, déplacez-le librement par sa barre, élargissez-le par sa poignée ; la page s'adapte automatiquement à la largeur du téléphone
 - **Blocs dans les notes** : encadrer une ou plusieurs lignes dans un bloc coloré, puis le déplacer dans la note grâce à sa poignée ⠿ (glisser à la souris ou au doigt) ; toucher la poignée pour changer la couleur, monter/descendre, dupliquer, retirer le cadre ou supprimer
 - **Glisser-déposer** : réordonner les notes (tri personnalisé) et les dossiers, ranger une note dans un dossier ou à la corbeille — clic-glisser à la souris, appui long puis glisser au doigt
 - **Corbeille** 30 jours, export/import JSON, export .txt, partage
