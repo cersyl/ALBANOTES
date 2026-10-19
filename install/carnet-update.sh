@@ -17,7 +17,7 @@ FORCE=0; [[ "${1:-}" == "--force" ]] && FORCE=1
 CUR=$(cat "$APP_DIR/VERSION" 2>/dev/null || echo 0)
 NEW=$(curl -fsSL "https://raw.githubusercontent.com/${CARNET_REPO}/${CARNET_BRANCH}/VERSION?$(date +%s)" | tr -d '[:space:]') || die "Impossible de joindre GitHub."
 echo -e " Version installée : ${YW}${CUR}${CL}   Disponible : ${YW}${NEW}${CL}"
-if [[ "$CUR" == "$NEW" && $FORCE -eq 0 ]]; then ok "Carnet est à jour. (update --force pour réinstaller)"; exit 0; fi
+if [[ "$CUR" == "$NEW" && $FORCE -eq 0 ]]; then ok "ALBANOTES est à jour. (update --force pour réinstaller)"; exit 0; fi
 
 msg "Sauvegarde de la base…"
 /usr/local/bin/carnet backup
@@ -36,7 +36,7 @@ systemctl start carnet
 for _ in $(seq 1 20); do curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1 && break; sleep 0.5; done
 if curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
   rm -rf "${APP_DIR}.old"
-  ok "Carnet mis à jour en $(cat "$APP_DIR/VERSION"). Les appareils proposeront « Recharger » à la prochaine ouverture."
+  ok "ALBANOTES mis à jour en $(cat "$APP_DIR/VERSION"). Les appareils proposeront « Recharger » à la prochaine ouverture."
 else
   echo -e " ${RD}Le service ne démarre pas, retour à la version précédente…${CL}"
   systemctl stop carnet; rm -rf "$APP_DIR"; mv "${APP_DIR}.old" "$APP_DIR"; systemctl start carnet

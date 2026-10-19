@@ -33,7 +33,7 @@ if ! command -v node >/dev/null || [[ "$(node -p 'process.versions.node.split(".
 fi
 ok "Node.js $(node -v)"
 
-msg "Téléchargement de Carnet (${REPO}@${BRANCH})…"
+msg "Téléchargement d'ALBANOTES (${REPO}@${BRANCH})…"
 id carnet >/dev/null 2>&1 || useradd --system --home "$DATA_DIR" --shell /usr/sbin/nologin carnet
 mkdir -p "$APP_DIR" "$DATA_DIR/backups" /etc/carnet
 TMP=$(mktemp -d)
@@ -42,7 +42,7 @@ rm -rf "${APP_DIR:?}"/*; cp -a "$TMP"/. "$APP_DIR"/; rm -rf "$TMP"
 # mktemp crée un dossier en 0700 : cp -a le recopie sur /opt/carnet → illisible pour l'utilisateur carnet
 chown -R root:root "$APP_DIR"; chmod -R u=rwX,go=rX "$APP_DIR"
 chown -R carnet:carnet "$DATA_DIR"
-ok "Carnet $(cat "$APP_DIR/VERSION")"
+ok "ALBANOTES $(cat "$APP_DIR/VERSION")"
 
 cat >/etc/carnet/carnet.conf <<EOF
 CARNET_REPO=${REPO}
@@ -54,7 +54,7 @@ EOF
 
 cat >/etc/systemd/system/carnet.service <<'EOF'
 [Unit]
-Description=Carnet — notes auto-hébergées
+Description=ALBANOTES — notes auto-hébergées
 After=network-online.target
 Wants=network-online.target
 
@@ -131,7 +131,7 @@ curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null && ok "Service actif 
 # Message d'accueil de la console
 cat >/etc/motd <<EOF
 
-  Carnet — notes auto-hébergées
+  ALBANOTES — notes auto-hébergées
   http://$(hostname -I | awk '{print $1}'):${PORT}
   update : mettre à jour   ·   carnet : administration
 
