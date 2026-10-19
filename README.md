@@ -1,6 +1,6 @@
 # ALBANOTES
 
-ALBANOTES : prise de notes rapide façon Samsung Notes, auto-hébergée dans un LXC Proxmox, synchronisée entre Windows, Android et tout navigateur.
+ALBANOTES : prise de notes rapide façon Samsung Notes, auto-hébergée, synchronisée entre Windows, Android et tout navigateur.
 
 - **Notes riches** : titre, gras/italique/souligné/barré, titres, couleurs et surlignage, listes à puces/numérotées, **listes de tâches cochables**, séparateurs, alignement
 - **Dessin à main levée** (stylet avec pression, surligneur, gomme, rejet de la paume) et **images** (collage, glisser-déposer, galerie/appareil photo)
@@ -12,19 +12,7 @@ ALBANOTES : prise de notes rapide façon Samsung Notes, auto-hébergée dans un 
 - Thème clair/sombre/auto, raccourcis clavier (Alt+N, Ctrl+F, Ctrl+S, Échap)
 - Serveur Node.js **sans aucune dépendance** (SQLite intégré), sauvegarde quotidienne de la base
 
-## 1. Publier le dépôt (une seule fois)
-
-```bash
-cd carnet
-git init && git add . && git commit -m "Carnet 1.0.0"
-git branch -M main
-git remote add origin https://github.com/cersyl/carnet.git
-git push -u origin main
-```
-
-Le dépôt doit être **public** (les scripts sont téléchargés sans authentification, comme les helper-scripts).
-
-## 2. Installer (sur l'hôte Proxmox)
+## 1. Installer (sur l'hôte Proxmox)
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/cersyl/carnet/main/ct/carnet.sh)"
@@ -32,7 +20,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/cersyl/carnet/main/ct/ca
 
 L'assistant propose les valeurs par défaut (Debian récente, 1 cœur, 512 Mo, 4 Go, DHCP, port 3000) ou un mode avancé (ID, stockage, IP fixe, VLAN…), puis demande le mot de passe de l'application.
 
-## 3. Mettre à jour
+## 2. Mettre à jour
 
 Après modification du code : incrémenter `VERSION`, puis `git push`. Ensuite, au choix :
 
@@ -41,7 +29,7 @@ Après modification du code : incrémenter `VERSION`, puis `git push`. Ensuite, 
 
 La mise à jour sauvegarde la base, remplace le code, redémarre et **revient automatiquement en arrière** si le service ne démarre pas. Les appareils affichent « Nouvelle version disponible — Recharger ».
 
-## 4. Accès Windows / Android
+## 3. Accès Windows / Android
 
 Une PWA exige **HTTPS**. Créer un proxy host dans Nginx Proxy Manager (ex. `notes.mondomaine`) → `http://IP_DU_CT:3000`, certificat Let's Encrypt, « Websockets » inutile.
 
