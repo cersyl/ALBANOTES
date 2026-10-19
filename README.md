@@ -5,6 +5,7 @@ ALBANOTES : prise de notes rapide façon Samsung Notes, auto-hébergée, synchro
 - **Notes riches** : titre, gras/italique/souligné/barré, titres, couleurs et surlignage, listes à puces/numérotées, **listes de tâches cochables**, séparateurs, alignement
 - **Dessin à main levée** (stylet avec pression, surligneur, gomme, rejet de la paume) et **images** (collage, glisser-déposer, galerie/appareil photo)
 - **Couleurs de note**, épinglage, favoris, **dossiers** colorés avec émoticônes (Maison, Bureau, Loisirs, Vie perso, Divers…), recherche, tri, grille/liste, sélection multiple (appui long)
+- **Blocs dans les notes** : encadrer une ou plusieurs lignes dans un bloc coloré, puis le déplacer dans la note grâce à sa poignée ⠿ (glisser à la souris ou au doigt) ; toucher la poignée pour changer la couleur, monter/descendre, dupliquer, retirer le cadre ou supprimer
 - **Glisser-déposer** : réordonner les notes (tri personnalisé) et les dossiers, ranger une note dans un dossier ou à la corbeille — clic-glisser à la souris, appui long puis glisser au doigt
 - **Corbeille** 30 jours, export/import JSON, export .txt, partage
 - **Hors-ligne d'abord** : tout est stocké sur l'appareil puis synchronisé (le plus récent gagne)
@@ -22,10 +23,12 @@ L'assistant propose les valeurs par défaut (Debian récente, 1 cœur, 512 Mo, 4
 
 ## 2. Mettre à jour
 
+Après modification du code : incrémenter `VERSION`, puis `git push`. Ensuite, au choix :
+
 - dans la console du CT : `update` (ou `update --force`)
 - depuis l'hôte : `pct exec <ID> -- update`
 
-La mise à jour sauvegarde la base, remplace le code, redémarre et **revient automatiquement en arrière** si le service ne démarre pas. Les appareils affichent « Nouvelle version disponible — Recharger ».
+La mise à jour sauvegarde la base, remplace le code, redémarre et **revient automatiquement en arrière** si le service ne démarre pas. Les appareils se mettent à jour d'eux-mêmes à la prochaine ouverture (ou dès qu'aucune note n'est en cours d'édition).
 
 ## 3. Accès Windows / Android
 
@@ -34,7 +37,7 @@ Une PWA exige **HTTPS**. Créer un proxy host dans Nginx Proxy Manager (ex. `not
 - **Windows** : ouvrir l'URL dans Edge ou Chrome → icône « Installer l'application » dans la barre d'adresse.
 - **Android** : Chrome → menu ⋮ → « Installer l'application ». Le partage de texte depuis n'importe quelle app vers « ALBANOTES » crée une note.
 
-Si le proxy est protégé par **mTLS**, la page fonctionne avec le certificat client installé, mais le service worker et la PWA installée sur Android gèrent mal les certificats clients : préférer un accès sans mTLS pour ce sous-domaine (le mot de passe + l'anti-bruteforce de Carnet protègent l'accès), ou un accès via VPN.
+Si le proxy est protégé par **mTLS**, la page fonctionne avec le certificat client installé, mais le service worker et la PWA installée sur Android gèrent mal les certificats clients : préférer un accès sans mTLS pour ce sous-domaine (le mot de passe + l'anti-bruteforce d'ALBANOTES protègent l'accès), ou un accès via VPN.
 
 ## Administration (dans le CT)
 
