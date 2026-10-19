@@ -22,8 +22,6 @@ L'assistant propose les valeurs par défaut (Debian récente, 1 cœur, 512 Mo, 4
 
 ## 2. Mettre à jour
 
-Après modification du code : incrémenter `VERSION`, puis `git push`. Ensuite, au choix :
-
 - dans la console du CT : `update` (ou `update --force`)
 - depuis l'hôte : `pct exec <ID> -- update`
 
@@ -34,7 +32,7 @@ La mise à jour sauvegarde la base, remplace le code, redémarre et **revient au
 Une PWA exige **HTTPS**. Créer un proxy host dans Nginx Proxy Manager (ex. `notes.mondomaine`) → `http://IP_DU_CT:3000`, certificat Let's Encrypt, « Websockets » inutile.
 
 - **Windows** : ouvrir l'URL dans Edge ou Chrome → icône « Installer l'application » dans la barre d'adresse.
-- **Android** : Chrome → menu ⋮ → « Installer l'application ». Le partage de texte depuis n'importe quelle app vers « Carnet » crée une note.
+- **Android** : Chrome → menu ⋮ → « Installer l'application ». Le partage de texte depuis n'importe quelle app vers « ALBANOTES » crée une note.
 
 Si le proxy est protégé par **mTLS**, la page fonctionne avec le certificat client installé, mais le service worker et la PWA installée sur Android gèrent mal les certificats clients : préférer un accès sans mTLS pour ce sous-domaine (le mot de passe + l'anti-bruteforce de Carnet protègent l'accès), ou un accès via VPN.
 
