@@ -1,10 +1,10 @@
-# Carnet
+# ALBANOTES
 
-Prise de notes rapide façon Samsung Notes, auto-hébergée dans un LXC Proxmox, synchronisée entre Windows, Android et tout navigateur.
+ALBANOTES : prise de notes rapide façon Samsung Notes, auto-hébergée dans un LXC Proxmox, synchronisée entre Windows, Android et tout navigateur.
 
 - **Notes riches** : titre, gras/italique/souligné/barré, titres, couleurs et surlignage, listes à puces/numérotées, **listes de tâches cochables**, séparateurs, alignement
 - **Dessin à main levée** (stylet avec pression, surligneur, gomme, rejet de la paume) et **images** (collage, glisser-déposer, galerie/appareil photo)
-- **Couleurs de note**, épinglage, favoris, **dossiers** colorés, recherche, tri, grille/liste, sélection multiple (appui long)
+- **Couleurs de note**, épinglage, favoris, **dossiers** colorés avec émoticônes (Maison, Bureau, Loisirs, Vie perso, Divers…), recherche, tri, grille/liste, sélection multiple (appui long)
 - **Corbeille** 30 jours, export/import JSON, export .txt, partage
 - **Hors-ligne d'abord** : tout est stocké sur l'appareil puis synchronisé (le plus récent gagne)
 - **Application installable** (PWA) : fenêtre dédiée sous Windows, icône + raccourci « Nouvelle note » + **cible de partage** sous Android
