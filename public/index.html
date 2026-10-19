@@ -88,10 +88,14 @@
     <div class="ed-scroll" id="edScroll">
       <input id="edTitle" class="ed-title" placeholder="Titre" autocomplete="off">
       <div class="ed-meta"><button id="edFolder" class="chip" data-action="ed-folder"></button><span id="edDate"></span></div>
-      <div id="edBody" class="ed-body" contenteditable="true" spellcheck="true" data-placeholder="Commencez à écrire…"></div>
+      <div class="ed-body-wrap">
+        <div id="edBody" class="ed-body" contenteditable="true" spellcheck="true" data-placeholder="Commencez à écrire…"></div>
+        <div id="blkLayer" class="blk-layer"></div>
+      </div>
     </div>
     <div class="ed-tools" id="edTools">
       <button class="tool" data-cmd="checklist" title="Liste de tâches"><i data-i="checkbox"></i></button>
+      <button class="tool" data-cmd="block" title="Bloc déplaçable"><i data-i="block"></i></button>
       <button class="tool" data-cmd="draw" title="Dessin"><i data-i="pen"></i></button>
       <button class="tool" data-cmd="image" title="Image"><i data-i="image"></i></button>
       <span class="sep"></span>
