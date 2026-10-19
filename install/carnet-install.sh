@@ -77,6 +77,7 @@ cat >/usr/local/bin/carnet <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 set -a; . /etc/carnet/carnet.conf; set +a
+cd /
 case "${1:-help}" in
   passwd)
     read -rsp "Nouveau mot de passe : " a; echo; read -rsp "Confirmation : " b; echo
@@ -111,15 +112,18 @@ cat >/etc/cron.d/carnet-backup <<'EOF'
 EOF
 
 systemctl daemon-reload
-systemctl enable -q --now carnet
+systemctl stop carnet 2>/dev/null || true
 
 if [[ -f /root/.carnet-pass ]]; then
-  runuser -u carnet -- env DATA_DIR="$DATA_DIR" node --no-warnings "$APP_DIR/server/server.js" passwd </root/.carnet-pass >/dev/null
+  (cd / && runuser -u carnet -- env DATA_DIR="$DATA_DIR" node --no-warnings "$APP_DIR/server/server.js" passwd </root/.carnet-pass >/dev/null)
   shred -u /root/.carnet-pass 2>/dev/null || rm -f /root/.carnet-pass
   ok "Mot de passe défini"
 else
   echo "   Pensez à définir le mot de passe : carnet passwd"
 fi
+
+systemctl enable -q carnet
+systemctl restart carnet
 
 for _ in $(seq 1 20); do curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1 && break; sleep 0.5; done
 curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null && ok "Service actif sur le port ${PORT}"
