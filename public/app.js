@@ -38,6 +38,7 @@ const ICONS = {
   indent: 'M3 21h18v-2H3v2zM3 8v8l4-4-4-4zm8 9h10v-2H11v2zM3 3v2h18V3H3zm8 6h10V7H11v2zm0 4h10v-2H11v2z',
   outdent: 'M11 17h10v-2H11v2zm-8-5 4 4V8l-4 4zm0 9h18v-2H3v2zM3 3v2h18V3H3zm8 6h10V7H11v2zm0 4h10v-2H11v2z',
   hr: 'M4 11h16v2H4z',
+  freePage: 'M3 3h8v6H3V3zm10 0h8v10h-8V3zM3 11h8v10H3V11zm10 4h8v6h-8v-6z',
   block: 'M19 3H5c-1.1 0-2 .9-2 2v6h18V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-6H3v6z',
   eraser: 'M16.24 3.56l4.95 4.94c.78.79.78 2.05 0 2.84L12 20.53a4.008 4.008 0 0 1-5.66 0L2.81 17c-.78-.79-.78-2.05 0-2.84l10.6-10.6c.79-.78 2.05-.78 2.83 0zM4.22 15.58l3.54 3.53c.78.79 2.04.79 2.83 0l3.53-3.53-4.95-4.95-4.95 4.95z',
   logout: 'M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z',
@@ -859,6 +860,7 @@ function openEditor(id, isNew = false) {
 function fillEditor(it) {
   ed.title.value = it.data.title || '';
   ed.body.innerHTML = it.data.html || '';
+  setFreeMode(!!it.data.free);
   ed.root.className = 'editor c-' + (it.data.color || 'default');
   updateEditorMeta(it);
   relayout();
@@ -886,10 +888,10 @@ async function commitEditor() {
   S.edPending = false;
   const html = cleanHtml(ed.body.innerHTML);
   const title = ed.title.value.trim();
-  if (title === it.data.title && html === it.data.html) return;
+  if (title === it.data.title && html === it.data.html && !!it.data.free === isFree()) return;
   const text = ed.body.innerText.replace(/ /g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);
   if (!S.edSaved && !title && !text && !/<img/.test(html)) return; // note neuve encore vide
-  await saveItem({ ...it, data: { ...it.data, title, html, text, edited_at: Date.now() } });
+  await saveItem({ ...it, data: { ...it.data, title, html, text, free: isFree(), edited_at: Date.now() } });
   S.edSaved = true;
   updateEditorMeta();
   render();
@@ -919,11 +921,18 @@ window.addEventListener('popstate', () => {
 ed.title.addEventListener('input', markDirty);
 ed.title.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); ed.body.focus(); placeCaretStart(ed.body); } });
 ed.body.addEventListener('input', markDirty);
-ed.body.addEventListener('focus', () => document.execCommand('defaultParagraphSeparator', false, 'div'));
+ed.body.addEventListener('focusin', () => document.execCommand('defaultParagraphSeparator', false, 'div'));
 
 function placeCaretStart(el) { const r = document.createRange(); r.setStart(el, 0); r.collapse(true); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
 function saveRange() { const s = getSelection(); if (s.rangeCount && ed.body.contains(s.anchorNode)) S.savedRange = s.getRangeAt(0).cloneRange(); }
 function restoreRange() {
+  if (isFree()) {
+    if (S.savedRange && ed.body.contains(S.savedRange.startContainer) && S.savedRange.startContainer !== ed.body) {
+      const fb = (S.savedRange.startContainer.nodeType === 1 ? S.savedRange.startContainer : S.savedRange.startContainer.parentElement).closest('.fb');
+      fb?.focus(); const s = getSelection(); s.removeAllRanges(); s.addRange(S.savedRange); return;
+    }
+    const fb = newFreeBlock(); placeCaretIn(fb); return;
+  }
   ed.body.focus();
   if (S.savedRange && ed.body.contains(S.savedRange.startContainer)) { const s = getSelection(); s.removeAllRanges(); s.addRange(S.savedRange); }
   else { const r = document.createRange(); r.selectNodeContents(ed.body); r.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
@@ -1028,7 +1037,8 @@ $('#edTools').addEventListener('click', (e) => {
   const b = e.target.closest('[data-cmd]'); if (!b) return;
   const cmd = b.dataset.cmd;
   if (cmd === 'checklist') { restoreRange(); return toggleChecklist(); }
-  if (cmd === 'block') return createBlock();
+  if (cmd === 'block') return isFree() ? (restoreRange(), undefined) : createBlock();
+  if (cmd === 'free') return toggleFree();
   if (cmd === 'image') return $('#imgInput').click();
   if (cmd === 'draw') return openDraw();
   if (cmd === 'text') return textStyleMenu();
@@ -1116,6 +1126,7 @@ const blkLayer = $('#blkLayer');
 const topLevel = (node) => { let n = node?.nodeType === 1 ? node : node?.parentElement; while (n && n.parentElement !== ed.body) n = n.parentElement; return n && ed.body.contains(n) ? n : null; };
 function layoutBlocks() {
   if (ed.root.hidden || !blkLayer) return;
+  if (isFree()) return layoutFree();
   const blocks = [...ed.body.children].filter((c) => c.classList.contains('nb'));
   blkLayer.innerHTML = blocks.map((b, i) =>
     `<button class="blk-h" data-i="${i}" title="Déplacer (glisser) · Options (toucher)" style="top:${b.offsetTop + 6}px;left:${b.offsetLeft + b.offsetWidth - 38}px">
@@ -1241,6 +1252,161 @@ dragEngine(blkLayer, '.blk-h', {
     relayout();
   },
 });
+
+/* ================= Page libre (style OneNote) =================
+   La note devient une page : cliquer/toucher un endroit vide crée un bloc de texte à cet endroit.
+   Barre au-dessus du bloc : glisser pour le déplacer n'importe où, toucher pour ses options.
+   Poignée à droite : glisser pour changer la largeur. */
+const isFree = () => ed.body.classList.contains('free');
+function setFreeMode(on) {
+  ed.body.classList.toggle('free', on);
+  ed.body.contentEditable = on ? 'false' : 'true';
+  if (on) ed.body.querySelectorAll(':scope > .fb').forEach((b) => { b.contentEditable = 'true'; });
+  $('[data-cmd="free"]')?.classList.toggle('active', on);
+  if (!on) { const w = $('.ed-body-wrap'); if (w) w.style.zoom = ''; ed.body.style.height = ''; }
+  const bb = $('[data-cmd="block"]'); if (bb) bb.title = on ? 'Nouveau bloc de texte' : 'Bloc déplaçable';
+}
+function newFreeBlock(x, y, w) {
+  const W = ed.body.clientWidth;
+  if (x == null) { // sous le dernier bloc, ou en haut de la zone visible
+    const bottom = Math.max(0, ...[...ed.body.querySelectorAll(':scope > .fb')].map((b) => b.offsetTop + b.offsetHeight));
+    x = 8; y = bottom ? bottom + 30 : 30;
+  }
+  w = w || Math.min(380, Math.max(160, W - x - 8));
+  const b = document.createElement('div');
+  b.className = 'fb'; b.dataset.c = 'default'; b.contentEditable = 'true';
+  b.style.cssText = `left:${Math.round(Math.max(0, Math.min(x, W - 60)))}px;top:${Math.round(Math.max(24, y))}px;width:${Math.round(w)}px`;
+  b.innerHTML = '<div><br></div>';
+  ed.body.appendChild(b);
+  relayout();
+  return b;
+}
+// clic dans le vide de la page → nouveau bloc à cet endroit
+ed.body.addEventListener('click', (e) => {
+  if (!isFree() || e.target !== ed.body) return;
+  const r = ed.body.getBoundingClientRect(), z = freeZoom();
+  const b = newFreeBlock((e.clientX - r.left) / z, (e.clientY - r.top) / z - 12);
+  b.focus(); placeCaretIn(b); saveRange();
+});
+// un bloc vidé disparaît quand on le quitte (comme OneNote)
+ed.body.addEventListener('focusout', (e) => {
+  const b = e.target.closest?.('.fb'); if (!b || !isFree()) return;
+  setTimeout(() => {
+    if (document.activeElement === b || !$('#sheet').hidden || !$('#draw').hidden) return;
+    if (b.textContent.trim() === '' && !b.querySelector('img, hr, li')) { b.remove(); markDirty(); relayout(); }
+  }, 150);
+});
+const freeZoom = () => +($('.ed-body-wrap').style.zoom || 1);
+function fitFree() {
+  // sur un écran plus étroit que la page, réduire l'affichage pour tout voir (comme un zoom)
+  const wrap = $('.ed-body-wrap'); if (!wrap) return;
+  if (!isFree()) { wrap.style.zoom = ''; return; }
+  const sc = $('#edScroll'), cs = getComputedStyle(sc);
+  const avail = sc.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const right = Math.max(0, ...[...ed.body.querySelectorAll(':scope > .fb')].map((b) => b.offsetLeft + b.offsetWidth)) + 8;
+  const z = Math.min(1, avail / right);
+  wrap.style.zoom = z < 0.98 ? z.toFixed(3) : '';
+}
+function layoutFree() {
+  if (!DRAG.active) fitFree();
+  const blocks = [...ed.body.querySelectorAll(':scope > .fb')];
+  const bottom = Math.max(0, ...blocks.map((b) => b.offsetTop + b.offsetHeight));
+  ed.body.style.height = Math.max(bottom + 260, ed.root.clientHeight * 0.75) + 'px';
+  const ox = ed.body.offsetLeft, oy = ed.body.offsetTop;
+  blkLayer.innerHTML = blocks.map((b, i) => `
+    <div class="fb-bar" data-i="${i}" style="left:${ox + b.offsetLeft}px;top:${oy + b.offsetTop - 22}px;width:${b.offsetWidth}px" title="Glisser pour déplacer · toucher pour les options"><span></span></div>
+    <div class="fb-size" data-i="${i}" style="left:${ox + b.offsetLeft + b.offsetWidth - 8}px;top:${oy + b.offsetTop + Math.max(0, b.offsetHeight / 2 - 18)}px" title="Largeur"></div>`).join('');
+}
+const freeAt = (i) => [...ed.body.querySelectorAll(':scope > .fb')][+i];
+
+// déplacer un bloc
+dragEngine(blkLayer, '.fb-bar', {
+  immediate: true,
+  key: (el) => el.dataset.i,
+  onTap(st) { const b = freeAt(st.key); if (b) freeBlockMenu(b); },
+  onStart(st, e) {
+    const b = freeAt(st.key); if (!b) return false;
+    st.b = b; st.ox = b.offsetLeft; st.oy = b.offsetTop; st.sx = e.clientX; st.sy = e.clientY;
+    b.classList.add('moving'); ed.body.appendChild(b); // au premier plan
+  },
+  onMove(st, x, y) {
+    const W = ed.body.clientWidth, z = freeZoom();
+    st.b.style.left = Math.round(Math.max(0, Math.min(st.ox + (x - st.sx) / z, W - 60))) + 'px';
+    st.b.style.top = Math.round(Math.max(24, st.oy + (y - st.sy) / z)) + 'px';
+    autoScroll.set(y, $('#edScroll'));
+    layoutFree();
+  },
+  onEnd(st) { autoScroll.stop(); st.b.classList.remove('moving'); markDirty(); relayout(); },
+});
+// changer la largeur
+dragEngine(blkLayer, '.fb-size', {
+  immediate: true,
+  key: (el) => el.dataset.i,
+  onStart(st, e) { const b = freeAt(st.key); if (!b) return false; st.b = b; st.w = b.offsetWidth; st.sx = e.clientX; },
+  onMove(st, x) {
+    const max = ed.body.clientWidth - st.b.offsetLeft;
+    st.b.style.width = Math.round(Math.max(120, Math.min(st.w + (x - st.sx) / freeZoom(), Math.max(120, max)))) + 'px';
+    layoutFree();
+  },
+  onEnd() { markDirty(); relayout(); },
+});
+function freeBlockMenu(b) {
+  const sw = (c) => `<button class="sw${(b.dataset.c || 'default') === c ? ' active' : ''}" data-col="${c}" style="background:${c === 'default' ? 'var(--surface-2)' : `var(--n-${c})`}"></button>`;
+  openSheet(`<h3>Bloc</h3><div class="drawer-label">Couleur</div><div class="sheet-row">${BLOCK_COLORS.map(sw).join('')}</div>
+    <button class="sheet-item" data-a="edit">${ic('edit')}<span>Écrire dans ce bloc</span></button>
+    <button class="sheet-item" data-a="full">${ic('notes')}<span>Pleine largeur</span></button>
+    <button class="sheet-item" data-a="dup">${ic('copy')}<span>Dupliquer</span></button>
+    <button class="sheet-item danger" data-a="del">${ic('trash')}<span>Supprimer le bloc</span></button>`,
+  async (e) => {
+    const col = e.target.closest('[data-col]');
+    if (col) { b.dataset.c = col.dataset.col; closeSheet(); markDirty(); return; }
+    const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
+    closeSheet();
+    if (a === 'edit') { b.focus(); placeCaretIn(b); saveRange(); return; }
+    if (a === 'full') { b.style.left = '0px'; b.style.width = ed.body.clientWidth + 'px'; }
+    if (a === 'dup') { const c = b.cloneNode(true); c.style.left = (b.offsetLeft + 24) + 'px'; c.style.top = (b.offsetTop + b.offsetHeight + 40) + 'px'; ed.body.appendChild(c); }
+    if (a === 'del') { if (b.textContent.trim() && !(await confirmBox('Supprimer ce bloc et son contenu ?', '', 'Supprimer'))) return; b.remove(); }
+    markDirty(); relayout();
+  });
+}
+// Basculer entre page classique et page libre, sans rien perdre
+async function toggleFree() {
+  if (!isFree()) {
+    normalizeTop();
+    const W = ed.body.clientWidth, groups = [];
+    let cur = null;
+    for (const el of [...ed.body.children]) {
+      if (el.classList.contains('nb')) { groups.push({ els: [el], top: el.offsetTop, nb: el }); cur = null; continue; }
+      if (!cur) { cur = { els: [], top: el.offsetTop }; groups.push(cur); }
+      cur.els.push(el);
+    }
+    const blocks = groups.filter((g) => g.els.some((x) => x.textContent.trim() || x.querySelector?.('img, hr, li'))).map((g) => {
+      const b = document.createElement('div');
+      b.className = 'fb'; b.dataset.c = g.nb?.dataset.c || 'default';
+      b.style.cssText = `left:0px;top:${Math.round(g.top + 24)}px;width:${Math.min(W, 640)}px`;
+      if (g.nb) { while (g.nb.firstChild) b.appendChild(g.nb.firstChild); } else g.els.forEach((x) => b.appendChild(x));
+      return b;
+    });
+    ed.body.innerHTML = '';
+    blocks.forEach((b) => ed.body.appendChild(b));
+    setFreeMode(true);
+    toast(blocks.length ? 'Page libre : glissez la barre d’un bloc pour le placer, touchez le vide pour écrire ailleurs' : 'Page libre : touchez un endroit de la page pour écrire');
+  } else {
+    if (!(await confirmBox('Revenir à la page classique ?', 'Les blocs seront empilés de haut en bas, dans l’ordre de leur position.', 'Revenir'))) return;
+    const blocks = [...ed.body.querySelectorAll(':scope > .fb')].sort((a, b) => a.offsetTop - b.offsetTop || a.offsetLeft - b.offsetLeft);
+    const frag = document.createDocumentFragment();
+    for (const b of blocks) {
+      const nb = document.createElement('div'); nb.className = 'nb'; nb.dataset.c = b.dataset.c || 'default';
+      while (b.firstChild) nb.appendChild(b.firstChild);
+      frag.appendChild(nb);
+    }
+    ed.body.innerHTML = ''; ed.body.style.height = '';
+    ed.body.appendChild(frag);
+    ed.body.appendChild(Object.assign(document.createElement('div'), { innerHTML: '<br>' }));
+    setFreeMode(false);
+  }
+  markDirty(); relayout();
+}
 
 /* ================= Dessin à main levée ================= */
 const D = { strokes: [], redo: [], tool: 'pen', color: '#1a1a1a', size: 3, cur: null, penSeen: false, dpr: 1, base: $('#drawBase'), live: $('#drawLive') };
