@@ -1,4 +1,4 @@
-/* Carnet — application de notes (PWA, hors-ligne d'abord, synchronisée) */
+/* ALBANOTES — application de notes (PWA, hors-ligne d'abord, synchronisée) */
 'use strict';
 
 /* ================= Icônes (Material, Apache 2.0) ================= */
@@ -225,7 +225,7 @@ function viewName(v = S.view) {
   if (v === 'all') return 'Toutes les notes';
   if (v === 'fav') return 'Favoris';
   if (v === 'trash') return 'Corbeille';
-  return folderById(v)?.data.name || 'Dossier';
+  { const f = folderById(v); return f ? `${folderEmoji(f)} ${f.data.name}` : 'Dossier'; }
 }
 function visibleNotes() {
   let list = notes();
@@ -261,7 +261,7 @@ function cardHtml(n) {
     <div class="c-foot">
       <span>${fmtDate(S.sort === 'created' ? d.created_at || n.updated_at : n.updated_at)}</span>
       ${total ? `<span>· ☑ ${checked}/${total}</span>` : ''}
-      ${folder ? `<span>· ${esc(folder.data.name)}</span>` : ''}
+      ${folder ? `<span>· ${esc(folderEmoji(folder))} ${esc(folder.data.name)}</span>` : ''}
     </div>
     ${d.pinned ? `<i class="c-badge" data-i="pin">${svg('pin')}</i>` : d.fav ? `<i class="c-badge" data-i="star">${svg('star')}</i>` : ''}
     <span class="c-check"></span>
@@ -295,13 +295,13 @@ function render() {
 function renderDrawer() {
   const all = notes().filter((n) => !n.data.trashed);
   const count = (f) => all.filter(f).length;
-  const item = (v, icon, label, n, dot) => `<button class="drawer-item${S.view === v ? ' active' : ''}" data-view="${esc(v)}">
-      ${dot ? `<span class="fdot" style="background:${esc(dot)}"></span>` : ic(icon)}<span>${esc(label)}</span><span class="n">${n ?? ''}</span></button>`;
+  const item = (v, icon, label, n, folder) => `<div class="drawer-row"><button class="drawer-item${S.view === v ? ' active' : ''}" data-view="${esc(v)}">
+      ${folder ? folderBadge(folder) : ic(icon)}<span>${esc(label)}</span><span class="n">${n ?? ''}</span></button>${folder ? `<button class="icon-btn fedit" data-fedit="${esc(v)}" title="Modifier">${svg('more')}</button>` : ''}</div>`;
   $('#drawerList').innerHTML =
     item('all', 'notes', 'Toutes les notes', all.length) +
     item('fav', 'star', 'Favoris', count((n) => n.data.fav)) +
     `<div class="drawer-sep"></div><div class="drawer-label">Dossiers</div>` +
-    folders().map((f) => item(f.id, 'folder', f.data.name, count((n) => n.data.folder === f.id), f.data.color || FOLDER_COLORS[0])).join('') +
+    folders().map((f) => item(f.id, 'folder', f.data.name, count((n) => n.data.folder === f.id), f)).join('') +
     `<div class="drawer-sep"></div>` +
     item('trash', 'trash', 'Corbeille', notes().filter((n) => n.data.trashed).length);
 }
@@ -322,7 +322,10 @@ function setView(v) {
 const openDrawer = () => { $('#drawer').classList.add('open'); $('#scrim').classList.add('open'); };
 const closeDrawer = () => { $('#drawer').classList.remove('open'); $('#scrim').classList.remove('open'); };
 $('#scrim').onclick = closeDrawer;
-$('#drawerList').addEventListener('click', (e) => { const b = e.target.closest('[data-view]'); if (b) setView(b.dataset.view); });
+$('#drawerList').addEventListener('click', (e) => {
+  const ed = e.target.closest('[data-fedit]'); if (ed) return folderMenu(ed.dataset.fedit);
+  const b = e.target.closest('[data-view]'); if (b) setView(b.dataset.view);
+});
 $('#drawerList').addEventListener('contextmenu', (e) => {
   const b = e.target.closest('[data-view]'); if (!b || !folderById(b.dataset.view)) return;
   e.preventDefault(); folderMenu(b.dataset.view);
@@ -394,9 +397,9 @@ function confirmBox(title, msg, ok = 'Supprimer') {
 function pickFolder(current) {
   return new Promise((resolve) => {
     sheetResolve = resolve;
-    const row = (id, label, dot) => `<button class="sheet-item${(current ?? null) === id ? ' active' : ''}" data-f="${id ?? ''}">
-      ${dot ? `<span class="fdot" style="background:${esc(dot)}"></span>` : ic('notes')}<span>${esc(label)}</span></button>`;
-    openSheet(`<h3>Déplacer vers</h3>${row(null, 'Aucun dossier')}${folders().map((f) => row(f.id, f.data.name, f.data.color)).join('')}
+    const row = (id, label, f) => `<button class="sheet-item${(current ?? null) === id ? ' active' : ''}" data-f="${id ?? ''}">
+      ${f ? folderBadge(f) : ic('notes')}<span>${esc(label)}</span></button>`;
+    openSheet(`<h3>Déplacer vers</h3>${row(null, 'Aucun dossier')}${folders().map((f) => row(f.id, f.data.name, f)).join('')}
       <button class="sheet-item" data-new>${ic('folderPlus')}<span>Nouveau dossier</span></button>`,
     async (e) => {
       const b = e.target.closest('[data-f]');
@@ -410,33 +413,89 @@ function pickFolder(current) {
 }
 
 /* ================= Dossiers ================= */
-async function createFolder() {
-  const name = await promptBox('Nouveau dossier', '', 'Créer');
-  if (!name) return null;
-  const used = new Set(folders().map((f) => f.data.color));
-  return saveItem({ id: uid(), type: 'folder', deleted: false, data: { name, color: FOLDER_COLORS.find((c) => !used.has(c)) || FOLDER_COLORS[0] } });
+/* Émoticônes de dossiers, groupées par thème [emoji, libellé, mots-clés] */
+const FOLDER_EMOJIS = [
+  ['Maison', [['🏠', 'Maison', 'maison logement'], ['🛋️', 'Salon', 'salon déco'], ['🍳', 'Cuisine', 'cuisine recette'], ['🛒', 'Courses', 'courses achat marché'], ['🧹', 'Ménage', 'ménage menage'], ['🔧', 'Bricolage', 'bricolage travaux réparation'], ['🌱', 'Jardin', 'jardin potager plante'], ['💡', 'Domotique', 'domotique home assistant'], ['🧾', 'Factures', 'facture factures'], ['🔑', 'Codes', 'code codes mot de passe wifi']]],
+  ['Bureau', [['💼', 'Bureau', 'bureau travail boulot'], ['📁', 'Dossiers', 'dossier dossiers'], ['📅', 'Agenda', 'agenda rendez-vous rdv'], ['📞', 'Appels', 'appel appels téléphone'], ['✉️', 'Courrier', 'courrier mail email'], ['📊', 'Chiffres', 'chiffres stats budget'], ['💻', 'Informatique', 'informatique pc serveur proxmox homelab'], ['📝', 'Réunions', 'réunion reunion compte-rendu'], ['🎯', 'Objectifs', 'objectif objectifs'], ['🚀', 'Projets', 'projet projets']]],
+  ['Loisirs', [['🎮', 'Jeux', 'jeu jeux loisir loisirs'], ['🎬', 'Films', 'film films série séries'], ['🎵', 'Musique', 'musique chanson'], ['📚', 'Lecture', 'livre livres lecture'], ['⚽', 'Sport', 'sport foot'], ['🚴', 'Vélo', 'vélo velo'], ['🎣', 'Pêche', 'pêche peche'], ['📷', 'Photo', 'photo photos'], ['🎨', 'Art', 'art dessin peinture'], ['✈️', 'Voyages', 'voyage voyages vacances']]],
+  ['Vie perso', [['👨‍👩‍👧', 'Famille', 'famille enfants'], ['❤️', 'Perso', 'perso personnel'], ['🎁', 'Cadeaux', 'cadeau cadeaux noël anniversaire'], ['🎉', 'Fêtes', 'fête fêtes événement'], ['🐾', 'Animaux', 'animaux chien chat'], ['💊', 'Santé', 'santé sante médecin'], ['💶', 'Argent', 'argent banque budget finances'], ['🚗', 'Voiture', 'voiture auto garage'], ['🎓', 'École', 'école ecole cours études'], ['🍷', 'Vins', 'vin vins cave']]],
+  ['Divers', [['📌', 'Divers', 'divers autre'], ['⭐', 'Important', 'important'], ['⏰', 'Rappels', 'rappel rappels'], ['💭', 'Idées', 'idée idées idee'], ['✅', 'À faire', 'à faire todo tâches'], ['📋', 'Listes', 'liste listes'], ['🔒', 'Privé', 'privé secret'], ['🗂️', 'Archives', 'archive archives'], ['🌍', 'Monde', 'monde actualité'], ['🧪', 'Tests', 'test tests essai']]],
+];
+const ALL_EMOJIS = FOLDER_EMOJIS.flatMap(([, list]) => list);
+function guessEmoji(name) {
+  const n = name.toLowerCase();
+  const hit = ALL_EMOJIS.find(([, label, kw]) => kw.split(' ').some((k) => k.length > 2 && n.includes(k)) || n.includes(label.toLowerCase()));
+  return hit ? hit[0] : '📁';
 }
-function folderMenu(id) {
-  const f = folderById(id); if (!f) return;
-  openSheet(`<h3>${esc(f.data.name)}</h3>
-    <div class="sheet-row">${FOLDER_COLORS.map((c) => `<button class="sw${f.data.color === c ? ' active' : ''}" style="background:${c}" data-c="${c}"></button>`).join('')}</div>
-    <button class="sheet-item" data-a="rename">${ic('edit')}<span>Renommer</span></button>
-    <button class="sheet-item danger" data-a="delete">${ic('trash')}<span>Supprimer le dossier</span></button>`,
-  async (e) => {
-    const c = e.target.closest('[data-c]');
-    if (c) { await saveItem({ ...f, data: { ...f.data, color: c.dataset.c } }); closeSheet(); render(); return; }
-    const a = e.target.closest('[data-a]')?.dataset.a;
-    if (a === 'rename') { closeSheet(); const n = await promptBox('Renommer le dossier', f.data.name, 'Renommer'); if (n) { await saveItem({ ...f, data: { ...f.data, name: n } }); render(); } }
-    if (a === 'delete') {
-      closeSheet();
-      if (await confirmBox('Supprimer le dossier ?', 'Les notes qu’il contient seront conservées dans « Toutes les notes ».')) {
-        for (const n of notes().filter((x) => x.data.folder === id)) await updateNote(n.id, { folder: null });
-        await tombstone(id);
-        if (S.view === id) S.view = 'all';
-        render();
-      }
+const folderEmoji = (f) => f?.data.emoji || (f ? guessEmoji(f.data.name) : '📁');
+const folderBadge = (f, big = false) => `<span class="femoji${big ? ' big' : ''}" style="--fc:${esc(f.data.color || FOLDER_COLORS[0])}">${esc(folderEmoji(f))}</span>`;
+
+/* Feuille unique de création / modification d'un dossier : nom + émoticône + couleur */
+function folderEditor(f) {
+  const isNew = !f;
+  const used = new Set(folders().map((x) => x.data.color));
+  const st = { name: f?.data.name || '', emoji: f?.data.emoji || '', color: f?.data.color || FOLDER_COLORS.find((c) => !used.has(c)) || FOLDER_COLORS[0], touched: !!f?.data.emoji };
+  return new Promise((resolve) => {
+    sheetResolve = resolve;
+    const card = openSheet(`<h3>${isNew ? 'Nouveau dossier' : 'Modifier le dossier'}</h3>
+      <form class="fe-form">
+        <div class="fe-head"><span class="femoji big" id="fePrev"></span><input type="text" id="feName" maxlength="60" placeholder="Nom du dossier" value="${esc(st.name)}"></div>
+        <div class="drawer-label">Couleur</div>
+        <div class="sheet-row">${FOLDER_COLORS.map((c) => `<button type="button" class="sw" style="background:${c}" data-c="${c}"></button>`).join('')}</div>
+        <div class="drawer-label">Émoticône</div>
+        <div class="emoji-tabs">${FOLDER_EMOJIS.map(([g], i) => `<button type="button" data-tab="${i}">${esc(g)}</button>`).join('')}</div>
+        <div class="emoji-grid" id="feGrid"></div>
+        <div class="sheet-actions">
+          ${isNew ? '' : `<button type="button" class="btn-text danger-text" data-del>Supprimer</button><span class="spacer"></span>`}
+          <button type="button" class="btn-text" data-x>Annuler</button><button class="btn-text">${isNew ? 'Créer' : 'Enregistrer'}</button>
+        </div>
+      </form>`,
+    async (e) => {
+      const c = e.target.closest('[data-c]'); if (c) { st.color = c.dataset.c; return paint(); }
+      const em = e.target.closest('[data-e]'); if (em) { st.emoji = em.dataset.e; st.touched = true; return paint(); }
+      const t = e.target.closest('[data-tab]'); if (t) { tab = +t.dataset.tab; return paint(); }
+      if (e.target.closest('[data-x]')) return closeSheet(undefined);
+      if (e.target.closest('[data-del]')) return closeSheet('delete');
+    });
+    const inp = card.querySelector('#feName');
+    let tab = Math.max(0, FOLDER_EMOJIS.findIndex(([, l]) => l.some(([e]) => e === st.emoji)));
+    function paint() {
+      const prev = card.querySelector('#fePrev');
+      prev.textContent = st.emoji || guessEmoji(st.name); prev.style.setProperty('--fc', st.color);
+      card.querySelectorAll('[data-c]').forEach((b) => b.classList.toggle('active', b.dataset.c === st.color));
+      card.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('on', +b.dataset.tab === tab));
+      const cur = st.emoji || guessEmoji(st.name);
+      card.querySelector('#feGrid').innerHTML = FOLDER_EMOJIS[tab][1].map(([e, l]) =>
+        `<button type="button" class="emoji-btn${e === cur ? ' active' : ''}" data-e="${e}" title="${esc(l)}"><span>${e}</span><small>${esc(l)}</small></button>`).join('');
     }
+    inp.addEventListener('input', () => { st.name = inp.value; if (!st.touched) paint(); });
+    card.querySelector('form').onsubmit = (e) => {
+      e.preventDefault();
+      const name = inp.value.trim(); if (!name) { inp.focus(); return; }
+      closeSheet({ name, emoji: st.emoji || guessEmoji(name), color: st.color });
+    };
+    paint();
+    if (isNew) setTimeout(() => inp.focus(), 50);
   });
+}
+async function createFolder() {
+  const r = await folderEditor(null);
+  if (!r || r === 'delete') return null;
+  return saveItem({ id: uid(), type: 'folder', deleted: false, data: r });
+}
+async function folderMenu(id) {
+  const f = folderById(id); if (!f) return;
+  closeDrawer();
+  const r = await folderEditor(f);
+  if (!r) return;
+  if (r === 'delete') {
+    if (await confirmBox(`Supprimer « ${f.data.name} » ?`, 'Les notes qu’il contient seront conservées dans « Toutes les notes ».')) {
+      for (const n of notes().filter((x) => x.data.folder === id)) await updateNote(n.id, { folder: null });
+      await tombstone(id);
+      if (S.view === id) S.view = 'all';
+    }
+  } else await saveItem({ ...f, data: { ...f.data, ...r } });
+  render();
 }
 
 /* ================= Actions de la liste ================= */
@@ -504,7 +563,7 @@ async function settingsMenu() {
     ${S.installPrompt ? `<button class="sheet-item" data-a="install">${ic('install')}<span>Installer l’application</span></button>` : ''}
     <button class="sheet-item" data-a="sync">${ic('sync')}<span>Synchroniser maintenant${pending ? ` (${pending} en attente)` : ''}</span></button>
     <button class="sheet-item" data-a="export">${ic('download')}<span>Exporter toutes les notes (JSON)</span></button>
-    <button class="sheet-item" data-a="import">${ic('upload')}<span>Importer (JSON Carnet ou .txt/.md)</span></button>
+    <button class="sheet-item" data-a="import">${ic('upload')}<span>Importer (JSON ALBANOTES ou .txt/.md)</span></button>
     <button class="sheet-item danger" data-a="logout">${ic('logout')}<span>Se déconnecter de cet appareil</span></button>
     <p class="muted">${esc(info)}</p>`,
   async (e) => {
@@ -529,7 +588,7 @@ function exportAll() {
   const out = { app: 'carnet', exported_at: new Date().toISOString(),
     folders: folders().map((f) => ({ id: f.id, ...f.data })),
     notes: notes().map((n) => ({ id: n.id, updated_at: n.updated_at, ...n.data })) };
-  download(`carnet-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(out, null, 1), 'application/json');
+  download(`albanotes-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(out, null, 1), 'application/json');
 }
 function importFiles() {
   const inp = document.createElement('input');
@@ -541,7 +600,7 @@ function importFiles() {
       if (file.name.endsWith('.json')) {
         try {
           const j = JSON.parse(txt);
-          for (const f of j.folders || []) if (!S.items.has(f.id)) await saveItem({ id: f.id, type: 'folder', deleted: false, data: { name: f.name, color: f.color } });
+          for (const f of j.folders || []) if (!S.items.has(f.id)) await saveItem({ id: f.id, type: 'folder', deleted: false, data: { name: f.name, color: f.color, emoji: f.emoji || guessEmoji(f.name) } });
           for (const x of j.notes || []) {
             const { id, updated_at, ...data } = x;
             await saveItem({ id: S.items.has(id) ? uid() : id, type: 'note', deleted: false, data: { ...data, created_at: data.created_at || updated_at || Date.now() } });
@@ -591,7 +650,7 @@ function updateEditorMeta(it = S.items.get(S.editing)) {
   if (!it) return;
   setIcon($('#edFavIcon'), it.data.fav ? 'star' : 'starO');
   $('[data-action="ed-fav"]').classList.toggle('on', !!it.data.fav);
-  $('#edFolder').textContent = folderById(it.data.folder)?.data.name || 'Aucun dossier';
+  { const f = folderById(it.data.folder); $('#edFolder').textContent = f ? `${folderEmoji(f)} ${f.data.name}` : 'Aucun dossier'; }
   $('#edDate').textContent = S.edSaved ? 'Modifiée ' + fmtFull(it.updated_at) : '';
 }
 function refreshEditorFromRemote() {

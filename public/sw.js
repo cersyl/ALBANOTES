@@ -1,4 +1,4 @@
-/* Carnet — service worker (version injectée par le serveur) */
+/* ALBANOTES — service worker (version injectée par le serveur) */
 const VERSION = '__VERSION__';
 const CACHE = 'carnet-' + VERSION;
 const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
