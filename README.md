@@ -10,6 +10,7 @@ ALBANOTES : prise de notes rapide façon Samsung Notes, auto-hébergée, synchro
 - **Glisser-déposer** : réordonner les notes (tri personnalisé) et les dossiers, ranger une note dans un dossier ou à la corbeille — clic-glisser à la souris, appui long puis glisser au doigt
 - **Corbeille** 30 jours, export/import JSON, export .txt, partage
 - **Hors-ligne d'abord** : tout est stocké sur l'appareil puis synchronisé (le plus récent gagne)
+- **Widget Android** : liste des notes sur l'écran d'accueil, dossier au choix (Toutes, Favoris ou un dossier), toucher une note pour l'ouvrir, **+** pour en créer une
 - **Applis Android (APK) et Windows (.exe)** : interface embarquée, fonctionnent même si le serveur est injoignable (les notes sont envoyées à son retour), compatibles mTLS, compilées automatiquement par GitHub Actions
 - **Application installable** (PWA) : fenêtre dédiée sous Windows, icône + raccourci « Nouvelle note » + **cible de partage** sous Android
 - Thème clair/sombre/auto, raccourcis clavier (Alt+N, Ctrl+F, Ctrl+S, Échap)
@@ -52,6 +53,7 @@ Au premier lancement : adresse du serveur (ex. `https://notes.mondomaine`, ou `h
 
 - l'interface est **embarquée** : l'appli s'ouvre et fonctionne sans serveur, les notes sont enregistrées sur l'appareil et envoyées dès que le serveur répond ;
 - l'interface se **met à jour toute seule** depuis le serveur après un `update` ; réinstaller l'APK ou l'.exe n'est nécessaire que si le code natif (`android/`, `desktop/`) change ;
+- **widget Android** : appui long sur l'écran d'accueil → *Widgets* → *ALBANOTES*, puis choix du dossier ; l'icône dossier du widget permet d'en changer. Il se met à jour quand l'appli synchronise (à son ouverture ou quand elle tourne en arrière-plan)
 - **mTLS** : sous Android, importer le certificat client (.p12) dans *Paramètres → Sécurité → Chiffrement et identifiants → Installer un certificat → Certificat utilisateur d'appli VPN et d'applis* ; l'appli le demande une fois puis le mémorise. Sous Windows, le certificat importé dans le magasin Windows (double-clic sur le .p12) est utilisé automatiquement.
 
 La clé de signature Android (`android/app/albanotes.keystore`, mot de passe `albanotes`) est dans le dépôt pour que chaque compilation puisse mettre à jour l'appli installée. Pour une clé privée, définir les secrets GitHub `ALBA_KEYSTORE_PASS` et adapter `android/app/build.gradle` (une nouvelle clé impose de désinstaller l'ancienne appli une fois).

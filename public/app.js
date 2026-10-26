@@ -319,8 +319,30 @@ function cardHtml(n) {
     <span class="c-check"></span>
   </article>`;
 }
+/* Widget Android : l'appli transmet un résumé des notes à l'écran d'accueil */
+const pushWidget = debounce(() => {
+  if (!NATIVE?.updateWidget) return;
+  const count = (h, re) => (h || '').match(re)?.length || 0;
+  const list = notes().filter((n) => !n.data.trashed).sort((a, b) => editedAt(b) - editedAt(a)).slice(0, 300);
+  const data = {
+    sort: S.sort,
+    folders: folders().map((f) => ({ id: f.id, name: f.data.name, emoji: folderEmoji(f), color: f.data.color || '' })),
+    notes: list.map((n) => {
+      const d = n.data, lines = (d.text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+      const total = count(d.html, /data-checked=/g), done = count(d.html, /data-checked="true"/g);
+      return {
+        id: n.id, title: d.title || lines[0] || 'Sans titre', preview: (d.title ? lines : lines.slice(1)).join(' · ').slice(0, 180),
+        folder: d.folder || '', fav: !!d.fav, pinned: !!d.pinned, color: d.color || 'default', edited: editedAt(n),
+        order: d.order ?? null, tasks: total ? `${done}/${total}` : '', image: /<img/.test(d.html || ''),
+      };
+    }),
+  };
+  try { NATIVE.updateWidget(JSON.stringify(data)); } catch { /* ancienne appli sans widget */ }
+}, 1500);
+
 function render() {
   if (DRAG.active) { DRAG.renderPending = true; return; }
+  pushWidget();
   const list = visibleNotes();
   const box = $('#notes');
   box.className = 'notes ' + S.layout;
@@ -887,9 +909,18 @@ function newNote(prefill = {}) {
   const it = { id: uid(), type: 'note', deleted: false, updated_at: Date.now(), dirty: false,
     data: { title: '', html: '', text: '', order: Math.min(0, ...notes().map((n) => n.data.order ?? 0)) - 1000, folder, color: 'default', fav: S.view === 'fav', pinned: false, trashed: false, created_at: Date.now(), ...prefill } };
   S.items.set(it.id, it);
+  if (prefill.html || prefill.title) {
+    // contenu reçu d'une autre appli (partage) : enregistrer tout de suite, sinon la note serait jugée vide
+    const tmp = document.createElement('div'); tmp.innerHTML = it.data.html;
+    it.data.text = [...tmp.childNodes].map((n) => n.textContent).join('\n').replace(/\u00a0/g, ' ').trim().slice(0, 4000);
+    it.data.edited_at = Date.now();
+    saveItem(it).then(() => { S.edSaved = true; updateEditorMeta(); render(); });
+    openEditor(it.id, false);
+    toast('Note créée à partir du partage');
+    return;
+  }
   openEditor(it.id, true);
-  if (prefill.html) { S.edPending = true; commitEditor(); }
-  else setTimeout(() => ed.body.focus(), 60);
+  setTimeout(() => ed.body.focus(), 60);
 }
 function openEditor(id, isNew = false) {
   const it = S.items.get(id); if (!it) return;
@@ -1680,8 +1711,14 @@ async function init() {
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { sync(); checkShellUpdate(); } });
   }
 
-  // Raccourcis PWA : ?new=1, et partage Android (share_target)
+  // Raccourcis PWA : ?new=1, partage Android (share_target), widget (?open=id)
   const p = new URLSearchParams(location.search);
+  if (p.has('open')) {
+    const id = p.get('open'); history.replaceState(null, '', location.pathname);
+    const it = S.items.get(id);
+    if (it && !it.deleted && it.type === 'note') openEditor(id); else toast('Note introuvable');
+    return;
+  }
   const parts = [p.get('text'), p.get('url')].filter(Boolean);
   if (p.has('new') || parts.length || p.has('title')) {
     history.replaceState(null, '', location.pathname);

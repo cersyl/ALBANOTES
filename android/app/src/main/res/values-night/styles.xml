@@ -7,4 +7,9 @@
         <item name="android:navigationBarColor">@color/bg</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+    <style name="ConfigTheme" parent="@android:style/Theme.Material.Dialog">
+        <item name="android:colorAccent">@color/w_accent</item>
+        <item name="android:windowMinWidthMajor">80%</item>
+        <item name="android:windowMinWidthMinor">90%</item>
+    </style>
 </resources>

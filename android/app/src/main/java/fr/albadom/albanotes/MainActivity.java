@@ -85,11 +85,20 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (Intent.ACTION_SEND.equals(intent.getAction())) web.loadUrl(startUrl(intent));
+        String a = intent.getAction();
+        if (Intent.ACTION_SEND.equals(a) || NotesWidget.ACTION_OPEN.equals(a) || NotesWidget.ACTION_NEW.equals(a)) {
+            web.loadUrl(startUrl(intent));
+        }
     }
 
-    /** Page de démarrage ; un texte partagé depuis une autre appli devient une nouvelle note. */
+    /** Page de démarrage ; un texte partagé depuis une autre appli devient une nouvelle note,
+     *  le widget ouvre une note (?open=id) ou en crée une (?new=1). */
     String startUrl(Intent intent) {
+        if (intent != null && NotesWidget.ACTION_OPEN.equals(intent.getAction())) {
+            String id = intent.getStringExtra(NotesWidget.EXTRA_NOTE);
+            if (id != null) return ORIGIN + "/?open=" + enc(id);
+        }
+        if (intent != null && NotesWidget.ACTION_NEW.equals(intent.getAction())) return ORIGIN + "/?new=1";
         if (intent != null && Intent.ACTION_SEND.equals(intent.getAction())) {
             String text = intent.getStringExtra(Intent.EXTRA_TEXT);
             String title = intent.getStringExtra(Intent.EXTRA_SUBJECT);
@@ -361,6 +370,17 @@ public class MainActivity extends Activity {
                 return true;
             } catch (IOException e) {
                 return false;
+            }
+        }
+
+        /** Résumé des notes pour le widget d'écran d'accueil. */
+        @JavascriptInterface
+        public void updateWidget(String json) {
+            if (json == null) return;
+            try {
+                WidgetData.save(MainActivity.this, json);
+                NotesWidget.refreshAll(MainActivity.this);
+            } catch (Exception ignored) {
             }
         }
 
