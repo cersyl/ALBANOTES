@@ -104,11 +104,28 @@ const SEC_HEADERS = {
   'X-Frame-Options': 'SAMEORIGIN',
 };
 
+/* Applis natives (Android / Windows) : elles embarquent l'interface et appellent l'API
+   depuis leur propre origine. On n'autorise que ces origines-là. credentials=true permet
+   au navigateur intégré de présenter le certificat client (mTLS) s'il y en a un. */
+const NATIVE_ORIGINS = new Set(['https://appassets.androidplatform.net', 'albanotes://app']);
+function corsHeaders(req) {
+  const o = req?.headers?.origin;
+  if (!o || !NATIVE_ORIGINS.has(o)) return {};
+  return {
+    'Access-Control-Allow-Origin': o,
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Max-Age': '86400',
+    Vary: 'Origin',
+  };
+}
 function send(res, status, body, headers = {}) {
   const isBuf = Buffer.isBuffer(body);
   const payload = isBuf || typeof body === 'string' ? body : JSON.stringify(body);
   res.writeHead(status, {
     ...SEC_HEADERS,
+    ...corsHeaders(res.req),
     'Content-Type': isBuf || typeof body === 'string' ? 'text/plain; charset=utf-8' : 'application/json',
     ...headers,
   });
@@ -136,10 +153,13 @@ function clientIp(req) {
   return (xff ? xff.split(',')[0] : req.socket.remoteAddress || '').trim();
 }
 
-function auth(req) {
+function auth(req, body) {
+  // jeton dans l'en-tête Authorization, ou dans le corps (_token) pour les applis natives :
+  // cela évite la requête de pré-vol CORS, que les proxys mTLS rejettent faute de certificat
   const h = req.headers.authorization || '';
-  if (!h.startsWith('Bearer ')) return null;
-  const th = sha256(h.slice(7));
+  const tok = h.startsWith('Bearer ') ? h.slice(7) : typeof body?._token === 'string' ? body._token : '';
+  if (!tok) return null;
+  const th = sha256(tok);
   if (!qSessionGet.get(th)) return null;
   qSessionTouch.run(Date.now(), th);
   return th;
@@ -160,12 +180,14 @@ function loginFailed(ip) {
 
 /* ---------- API ---------- */
 async function handleApi(req, res, pathname) {
+  if (req.method === 'OPTIONS') { res.writeHead(204, { ...SEC_HEADERS, ...corsHeaders(req) }); return res.end(); }
   if (pathname === '/api/health') return send(res, 200, { ok: true, version: VERSION });
+  const body = req.method === 'POST' ? await readBody(req) : {};
 
   if (pathname === '/api/login' && req.method === 'POST') {
     const ip = clientIp(req);
     if (loginBlocked(ip)) return send(res, 429, { error: 'Trop de tentatives, réessayez plus tard.' });
-    const { password } = await readBody(req);
+    const { password } = body;
     const stored = getKV('password');
     if (!stored) return send(res, 503, { error: 'Aucun mot de passe configuré. Lancez « carnet passwd » dans le conteneur.' });
     if (typeof password !== 'string' || !verifyPassword(password, stored)) {
@@ -180,7 +202,7 @@ async function handleApi(req, res, pathname) {
     return send(res, 200, { token, version: VERSION });
   }
 
-  const session = auth(req);
+  const session = auth(req, body);
   if (!session) return send(res, 401, { error: 'Non authentifié' });
 
   if (pathname === '/api/logout' && req.method === 'POST') {
@@ -188,8 +210,8 @@ async function handleApi(req, res, pathname) {
     return send(res, 200, { ok: true });
   }
 
-  if (pathname === '/api/stats' && req.method === 'GET') {
-    const out = { version: VERSION, rev: Number(getKV('rev') || 0) };
+  if (pathname === '/api/stats') {
+    const out = { version: VERSION, rev: Number(getKV('rev') || 0), repo: process.env.CARNET_REPO || '' };
     for (const r of qStats.all()) out[r.type] = r.n;
     return send(res, 200, out);
   }
@@ -200,7 +222,6 @@ async function handleApi(req, res, pathname) {
    * (updated_at) puis renvoie tout ce qui a changé depuis.
    */
   if (pathname === '/api/sync' && req.method === 'POST') {
-    const body = await readBody(req);
     const since = Number(body.since) || 0;
     const changes = Array.isArray(body.changes) ? body.changes : [];
     let rev = Number(getKV('rev') || 0);
@@ -246,6 +267,7 @@ function serveStatic(req, res, pathname) {
     const noCache = ['.html', '.webmanifest'].includes(ext) || rel === '/sw.js';
     res.writeHead(200, {
       ...SEC_HEADERS,
+      ...corsHeaders(req),
       'Content-Type': MIME[ext] || 'application/octet-stream',
       'Cache-Control': noCache ? 'no-cache' : 'public, max-age=3600',
       ...(rel === '/sw.js' ? { 'Service-Worker-Allowed': '/' } : {}),

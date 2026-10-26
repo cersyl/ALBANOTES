@@ -1,0 +1,63 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Version de l'appli = fichier VERSION à la racine du dépôt (ex. 1.5.0 -> versionCode 10500)
+def appVersion = rootProject.file('../VERSION').text.trim()
+def nums = appVersion.tokenize('.-').collect { it.isInteger() ? it.toInteger() : 0 } + [0, 0, 0]
+def appVersionCode = nums[0] * 10000 + nums[1] * 100 + nums[2]
+
+android {
+    namespace 'fr.albadom.albanotes'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'fr.albadom.albanotes'
+        minSdk 24
+        targetSdk 34
+        versionCode appVersionCode
+        versionName appVersion
+    }
+
+    // Clé de signature fixe : indispensable pour installer une nouvelle version par-dessus l'ancienne.
+    // Remplaçable par vos propres secrets GitHub (ALBA_KEYSTORE_B64 / ALBA_KEYSTORE_PASS).
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('ALBA_KEYSTORE') ?: 'albanotes.keystore')
+            storePassword System.getenv('ALBA_KEYSTORE_PASS') ?: 'albanotes'
+            keyAlias System.getenv('ALBA_KEY_ALIAS') ?: 'albanotes'
+            keyPassword System.getenv('ALBA_KEYSTORE_PASS') ?: 'albanotes'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            assets.srcDir new File(buildDir, 'generated/albanotes-assets')
+        }
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+// L'interface web (dossier public/ du dépôt) est embarquée dans l'APK, dans assets/www/
+def copyWww = tasks.register('copyWww', Copy) {
+    from(rootProject.file('../public')) { exclude 'sw.js' }
+    from(rootProject.file('../VERSION'))
+    into new File(buildDir, 'generated/albanotes-assets/www')
+}
+preBuild.dependsOn copyWww

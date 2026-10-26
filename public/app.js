@@ -90,6 +90,7 @@ function toast(msg, action, fn, ms = 3500) {
   clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, ms);
 }
 function download(name, content, type) {
+  if (NATIVE?.saveFile) { toast(NATIVE.saveFile(name, String(content)) || 'Fichier enregistré'); return; }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([content], { type }));
   a.download = name; a.click();
@@ -157,19 +158,45 @@ async function saveItem(item) {
 const updateNote = (id, patch) => { const it = S.items.get(id); return saveItem({ ...it, data: { ...it.data, ...patch } }); };
 const tombstone = (id) => { const it = S.items.get(id); if (it) return saveItem({ ...it, deleted: true, data: null }); };
 
+/* ================= Applis natives (Android / Windows) =================
+   L'interface est embarquée dans l'appli ; window.AlbaNative est fourni par l'hôte natif.
+   Les appels API partent vers l'adresse du serveur choisie à la connexion. */
+const NATIVE = (() => { try { return window.AlbaNative || null; } catch { return null; } })();
+let SERVER = NATIVE ? String(NATIVE.getServer() || '') : '';
+const cmpVer = (a, b) => {
+  const x = String(a || '0').split(/[.-]/).map((n) => parseInt(n, 10) || 0), y = String(b || '0').split(/[.-]/).map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0);
+  return 0;
+};
+function normServer(u) {
+  u = String(u || '').trim().replace(/\/+$/, '');
+  if (u && !/^https?:\/\//i.test(u)) u = 'https://' + u;
+  return u;
+}
+
 /* ================= API & synchronisation ================= */
 async function api(path, body) {
-  const r = await fetch(path, {
-    method: body === undefined ? 'GET' : 'POST',
-    headers: { 'Content-Type': 'application/json', ...(S.token ? { Authorization: 'Bearer ' + S.token } : {}) },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  const timeout = AbortSignal.timeout?.(path === '/api/sync' ? 120_000 : 15_000);
+  const opts = NATIVE
+    // requête « simple » (pas de pré-vol CORS, rejeté par les proxys mTLS) : texte brut, jeton dans le corps,
+    // credentials=include pour que le certificat client soit présenté si le serveur le demande
+    ? { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ ...(body || {}), ...(S.token ? { _token: S.token } : {}) }) }
+    : { method: body === undefined ? 'GET' : 'POST',
+        headers: { 'Content-Type': 'application/json', ...(S.token ? { Authorization: 'Bearer ' + S.token } : {}) },
+        body: body === undefined ? undefined : JSON.stringify(body) };
+  let r;
+  try { r = await fetch(SERVER + path, { ...opts, signal: timeout }); }
+  catch { throw Object.assign(new Error('Serveur injoignable'), { offline: true }); }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(data.error || r.statusText), { status: r.status });
   return data;
 }
 let syncing = false, syncAgain = false;
-const setSync = (s) => { $('#syncDot').className = 'sync-dot ' + s; $('#syncDot').title = { '': 'Synchronisé', sync: 'Synchronisation…', err: 'Erreur de synchronisation', off: 'Hors ligne' }[s] ?? ''; };
+const setSync = (s) => {
+  $('#syncDot').className = 'sync-dot ' + s;
+  $('#syncDot').title = { '': 'Synchronisé', sync: 'Synchronisation…', err: 'Serveur injoignable — notes enregistrées sur cet appareil, envoi automatique au retour du serveur', off: 'Hors ligne — notes enregistrées sur cet appareil' }[s] ?? '';
+};
 const scheduleSync = debounce(() => sync(), 1200);
 
 async function sync() {
@@ -211,19 +238,32 @@ async function sync() {
 }
 
 /* ================= Connexion ================= */
-function showLogin() { $('#login').hidden = false; setTimeout(() => $('#loginPw').focus(), 50); }
+function showLogin() {
+  $('#login').hidden = false;
+  const srv = $('#loginServer');
+  if (NATIVE && srv) { srv.hidden = false; srv.required = true; srv.value = SERVER; }
+  setTimeout(() => (NATIVE && !SERVER ? srv : $('#loginPw')).focus(), 50);
+}
 $('#loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('#loginErr').textContent = '';
+  const prevServer = SERVER;
+  if (NATIVE) SERVER = normServer($('#loginServer').value);
   try {
     const r = await api('/api/login', { password: $('#loginPw').value });
+    if (NATIVE) { NATIVE.setServer(SERVER); setTimeout(checkShellUpdate, 3000); }
     S.token = r.token; pref.set('token', r.token);
     $('#loginPw').value = ''; $('#login').hidden = true;
     // forcer une resynchronisation complète
     await DB.setMeta('rev', 0);
     S.items.forEach((i) => { i.dirty = true; });
     await sync();
-  } catch (err) { $('#loginErr').textContent = err.message || 'Connexion impossible'; }
+  } catch (err) {
+    if (NATIVE && err.offline) SERVER = prevServer || SERVER;
+    $('#loginErr').textContent = err.offline
+      ? (NATIVE ? 'Serveur injoignable : vérifiez l’adresse, le réseau et, si le serveur l’exige, le certificat client.' : 'Serveur injoignable.')
+      : err.message || 'Connexion impossible';
+  }
 });
 
 /* ================= Rendu de la liste ================= */
@@ -770,8 +810,10 @@ function applyTheme() {
 async function settingsMenu() {
   closeDrawer();
   let info = '';
-  try { const s = await api('/api/stats'); info = `Serveur v${s.version} · ${s.note || 0} notes · ${s.folder || 0} dossiers`; }
-  catch { info = 'Serveur injoignable — les modifications seront envoyées au retour du réseau.'; }
+  let repo = '';
+  try { const s = await api('/api/stats'); repo = s.repo || ''; info = `Serveur v${s.version} · ${s.note || 0} notes · ${s.folder || 0} dossiers`; }
+  catch { info = 'Serveur injoignable — les notes restent enregistrées sur cet appareil et seront envoyées au retour du serveur.'; }
+  if (NATIVE) info = `Appli ${NATIVE.platform?.() || ''} v${NATIVE.shellVersion?.() || '?'} · ${SERVER}\n` + info;
   const pending = [...S.items.values()].filter((i) => i.dirty).length;
   const seg = (v, l) => `<button class="${S.theme === v ? 'on' : ''}" data-t="${v}">${l}</button>`;
   openSheet(`<h3>Paramètres</h3>
@@ -779,10 +821,11 @@ async function settingsMenu() {
     <div class="seg">${seg('auto', 'Auto')}${seg('light', 'Clair')}${seg('dark', 'Sombre')}</div>
     ${S.installPrompt ? `<button class="sheet-item" data-a="install">${ic('install')}<span>Installer l’application</span></button>` : ''}
     <button class="sheet-item" data-a="sync">${ic('sync')}<span>Synchroniser maintenant${pending ? ` (${pending} en attente)` : ''}</span></button>
+    ${!NATIVE && repo ? `<a class="sheet-item" href="https://github.com/${esc(repo)}/releases/latest" target="_blank" rel="noopener">${ic('install')}<span>Applis Android / Windows (hors connexion)</span></a>` : ''}
     <button class="sheet-item" data-a="export">${ic('download')}<span>Exporter toutes les notes (JSON)</span></button>
     <button class="sheet-item" data-a="import">${ic('upload')}<span>Importer (JSON ALBANOTES ou .txt/.md)</span></button>
     <button class="sheet-item danger" data-a="logout">${ic('logout')}<span>Se déconnecter de cet appareil</span></button>
-    <p class="muted">${esc(info)}</p>`,
+    <p class="muted" style="white-space:pre-line">${esc(info)}</p>`,
   async (e) => {
     const t = e.target.closest('[data-t]');
     if (t) { S.theme = t.dataset.t; pref.set('theme', S.theme); applyTheme(); $$('.seg button', $('#sheetCard')).forEach((b) => b.classList.toggle('on', b === t)); return; }
@@ -1571,7 +1614,31 @@ function tryApplyUpdate() {
   toast('Mise à jour d’ALBANOTES…', null, null, 2000);
   w.postMessage('skipWaiting');
 }
+let reloading = false;
+function reloadWhenIdle() { // recharger dès que l'utilisateur n'écrit plus
+  if (reloading) return;
+  if (busy()) { setTimeout(reloadWhenIdle, 1500); return; }
+  reloading = true; toast('Mise à jour d’ALBANOTES…', null, null, 2000);
+  commitEditor().finally(() => location.reload());
+}
+/* Appli native : l'interface embarquée se met à jour depuis le serveur (même principe que
+   le service worker de la version web) ; l'appli Android/Windows elle-même n'a pas à être réinstallée. */
+let shellChecking = false;
+async function checkShellUpdate() {
+  if (!NATIVE?.saveShell || !SERVER || shellChecking) return;
+  shellChecking = true;
+  try {
+    const get = (p) => fetch(SERVER + p, { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout?.(20_000) })
+      .then((r) => { if (!r.ok) throw new Error(p); return r.text(); });
+    const h = JSON.parse(await get('/api/health'));
+    if (!h.version || cmpVer(h.version, NATIVE.shellVersion()) <= 0) return;
+    const [html, js, css] = await Promise.all([get('/index.html'), get('/app.js'), get('/app.css')]);
+    if (!/AlbaNative/.test(js) || !/id="loginForm"/.test(html)) return; // version serveur trop ancienne pour l'appli
+    if (NATIVE.saveShell(h.version, html, js, css)) reloadWhenIdle();
+  } catch { /* serveur injoignable : on garde l'interface actuelle */ } finally { shellChecking = false; }
+}
 function registerSW() {
+  if (NATIVE) return; // l'interface est embarquée dans l'appli
   if (!('serviceWorker' in navigator)) return;
   navigator.serviceWorker.register('/sw.js').then((reg) => {
     const offer = (w) => { if (w && navigator.serviceWorker.controller) { pendingWorker = w; tryApplyUpdate(); } };
@@ -1588,14 +1655,6 @@ function registerSW() {
   }).catch(() => {});
   // Recharger uniquement lors d'une mise à jour (pas à la toute première installation)
   const hadController = !!navigator.serviceWorker.controller;
-  let reloading = false;
-  // la nouvelle version est active : recharger dès que l'utilisateur n'écrit plus
-  const reloadWhenIdle = () => {
-    if (reloading) return;
-    if (busy()) { setTimeout(reloadWhenIdle, 1500); return; }
-    reloading = true; toast('Mise à jour d’ALBANOTES…', null, null, 2000);
-    commitEditor().finally(() => location.reload());
-  };
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) reloadWhenIdle(); });
 }
 
@@ -1614,12 +1673,18 @@ async function init() {
   await purgeTrash();
   render();
   if (!S.token) { showLogin(); setSync('off'); } else sync();
+  if (NATIVE) {
+    document.documentElement.classList.add('native');
+    setTimeout(checkShellUpdate, 4000);
+    setInterval(checkShellUpdate, 30 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { sync(); checkShellUpdate(); } });
+  }
 
   // Raccourcis PWA : ?new=1, et partage Android (share_target)
   const p = new URLSearchParams(location.search);
   const parts = [p.get('text'), p.get('url')].filter(Boolean);
   if (p.has('new') || parts.length || p.has('title')) {
-    history.replaceState(null, '', '/');
+    history.replaceState(null, '', location.pathname);
     if (parts.length || p.get('title')) {
       const text = parts.join('\n');
       newNote({ title: p.get('title') || '', html: text.split('\n').map((l) => `<div>${esc(l) || '<br>'}</div>`).join('') });

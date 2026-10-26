@@ -302,3 +302,5 @@ i[data-i] svg { width: 100%; height: 100%; fill: currentColor; }
 .ed-body .fb[data-c="pink"] { background: var(--n-pink); } .ed-body .fb[data-c="purple"] { background: var(--n-purple); }
 .ed-body .fb[data-c="blue"] { background: var(--n-blue); } .ed-body .fb[data-c="green"] { background: var(--n-green); }
 .ed-body .fb[data-c="gray"] { background: var(--n-gray); }
+
+a.sheet-item { color: inherit; text-decoration: none; }

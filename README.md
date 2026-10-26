@@ -10,6 +10,7 @@ ALBANOTES : prise de notes rapide façon Samsung Notes, auto-hébergée, synchro
 - **Glisser-déposer** : réordonner les notes (tri personnalisé) et les dossiers, ranger une note dans un dossier ou à la corbeille — clic-glisser à la souris, appui long puis glisser au doigt
 - **Corbeille** 30 jours, export/import JSON, export .txt, partage
 - **Hors-ligne d'abord** : tout est stocké sur l'appareil puis synchronisé (le plus récent gagne)
+- **Applis Android (APK) et Windows (.exe)** : interface embarquée, fonctionnent même si le serveur est injoignable (les notes sont envoyées à son retour), compatibles mTLS, compilées automatiquement par GitHub Actions
 - **Application installable** (PWA) : fenêtre dédiée sous Windows, icône + raccourci « Nouvelle note » + **cible de partage** sous Android
 - Thème clair/sombre/auto, raccourcis clavier (Alt+N, Ctrl+F, Ctrl+S, Échap)
 - Serveur Node.js **sans aucune dépendance** (SQLite intégré), sauvegarde quotidienne de la base
@@ -40,6 +41,21 @@ Une PWA exige **HTTPS**. Créer un proxy host dans Nginx Proxy Manager (ex. `not
 
 Si le proxy est protégé par **mTLS**, la page fonctionne avec le certificat client installé, mais le service worker et la PWA installée sur Android gèrent mal les certificats clients : préférer un accès sans mTLS pour ce sous-domaine (le mot de passe + l'anti-bruteforce d'ALBANOTES protègent l'accès), ou un accès via VPN.
 
+## 4. Applis Android et Windows (hors connexion)
+
+À chaque changement du fichier `VERSION` poussé sur `main`, GitHub Actions compile les applis et les publie dans **Releases** (`https://github.com/cersyl/carnet/releases/latest`). Le lien est aussi dans *Paramètres* de la version web. On peut relancer la compilation à la main : onglet *Actions* → *Applis Android et Windows* → *Run workflow*.
+
+- **Android** : `ALBANOTES-x.y.z.apk`, à installer sur le téléphone en autorisant cette source. Les versions suivantes s'installent par-dessus.
+- **Windows** : `ALBANOTES-Setup-x.y.z.exe` (installation) ou `ALBANOTES-Portable-x.y.z.exe`. L'appli n'est pas signée : *Informations complémentaires* → *Exécuter quand même*.
+
+Au premier lancement : adresse du serveur (ex. `https://notes.mondomaine`, ou `http://IP_DU_CT:3000` sur le réseau local) et mot de passe. Ensuite :
+
+- l'interface est **embarquée** : l'appli s'ouvre et fonctionne sans serveur, les notes sont enregistrées sur l'appareil et envoyées dès que le serveur répond ;
+- l'interface se **met à jour toute seule** depuis le serveur après un `update` ; réinstaller l'APK ou l'.exe n'est nécessaire que si le code natif (`android/`, `desktop/`) change ;
+- **mTLS** : sous Android, importer le certificat client (.p12) dans *Paramètres → Sécurité → Chiffrement et identifiants → Installer un certificat → Certificat utilisateur d'appli VPN et d'applis* ; l'appli le demande une fois puis le mémorise. Sous Windows, le certificat importé dans le magasin Windows (double-clic sur le .p12) est utilisé automatiquement.
+
+La clé de signature Android (`android/app/albanotes.keystore`, mot de passe `albanotes`) est dans le dépôt pour que chaque compilation puisse mettre à jour l'appli installée. Pour une clé privée, définir les secrets GitHub `ALBA_KEYSTORE_PASS` et adapter `android/app/build.gradle` (une nouvelle clé impose de désinstaller l'ancienne appli une fois).
+
 ## Administration (dans le CT)
 
 | Commande | Effet |
@@ -67,6 +83,9 @@ install/carnet-install.sh  installation dans le CT (Node 24, service systemd, ou
 install/carnet-update.sh   mise à jour avec sauvegarde et retour arrière
 server/server.js           API (connexion, synchronisation) + fichiers statiques
 public/                    application (HTML/CSS/JS sans framework, service worker, manifeste)
+android/                   appli Android (WebView native, interface embarquée, certificat client via le trousseau)
+desktop/                   appli Windows (Electron, interface embarquée, certificat client du magasin Windows)
+.github/workflows/         compilation et publication automatiques des applis
 ```
 
 Synchronisation : chaque note/dossier porte un horodatage `updated_at` ; le client envoie ses modifications et la dernière révision serveur connue, le serveur applique « le plus récent gagne » et renvoie ce qui a changé depuis. Les suppressions définitives sont propagées par pierres tombales.

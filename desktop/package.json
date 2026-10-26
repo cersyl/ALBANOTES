@@ -1,0 +1,40 @@
+{
+  "name": "albanotes",
+  "productName": "ALBANOTES",
+  "version": "1.5.0",
+  "description": "ALBANOTES — notes rapides synchronisées avec votre serveur, utilisables hors connexion",
+  "author": "cersyl",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "www": "node copy-www.js",
+    "start": "node copy-www.js && electron .",
+    "dist": "node copy-www.js && electron-builder --win --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.17.0"
+  },
+  "build": {
+    "appId": "fr.albadom.albanotes",
+    "productName": "ALBANOTES",
+    "files": ["main.js", "preload.js", "www/**/*", "package.json"],
+    "directories": { "output": "dist", "buildResources": "build" },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ALBANOTES",
+      "artifactName": "ALBANOTES-Setup-${version}.${ext}"
+    },
+    "portable": { "artifactName": "ALBANOTES-Portable-${version}.${ext}" }
+  }
+}
