@@ -123,6 +123,8 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: true,
+      // autorise un serveur local en http:// (ex. http://192.168.0.x:3000) depuis l'interface embarquée
+      allowRunningInsecureContent: true,
     },
   });
   if (cfg.maximized) win.maximize();
