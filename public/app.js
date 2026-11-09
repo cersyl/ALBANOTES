@@ -38,6 +38,7 @@ const ICONS = {
   indent: 'M3 21h18v-2H3v2zM3 8v8l4-4-4-4zm8 9h10v-2H11v2zM3 3v2h18V3H3zm8 6h10V7H11v2zm0 4h10v-2H11v2z',
   outdent: 'M11 17h10v-2H11v2zm-8-5 4 4V8l-4 4zm0 9h18v-2H3v2zM3 3v2h18V3H3zm8 6h10V7H11v2zm0 4h10v-2H11v2z',
   hr: 'M4 11h16v2H4z',
+  cart: 'M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1.003 1.003 0 0 0 20 4H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z',
   freePage: 'M3 3h8v6H3V3zm10 0h8v10h-8V3zM3 11h8v10H3V11zm10 4h8v6h-8v-6z',
   block: 'M19 3H5c-1.1 0-2 .9-2 2v6h18V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-6H3v6z',
   eraser: 'M16.24 3.56l4.95 4.94c.78.79.78 2.05 0 2.84L12 20.53a4.008 4.008 0 0 1-5.66 0L2.81 17c-.78-.79-.78-2.05 0-2.84l10.6-10.6c.79-.78 2.05-.78 2.83 0zM4.22 15.58l3.54 3.53c.78.79 2.04.79 2.83 0l3.53-3.53-4.95-4.95-4.95 4.95z',
@@ -271,6 +272,7 @@ function viewName(v = S.view) {
   if (v === 'all') return 'Toutes les notes';
   if (v === 'fav') return 'Favoris';
   if (v === 'trash') return 'Corbeille';
+  if (v === 'shop') return '🛒 Listes de courses';
   { const f = folderById(v); return f ? `${folderEmoji(f)} ${f.data.name}` : 'Dossier'; }
 }
 function visibleNotes() {
@@ -279,6 +281,7 @@ function visibleNotes() {
   else {
     list = list.filter((n) => !n.data.trashed);
     if (S.view === 'fav') list = list.filter((n) => n.data.fav);
+    else if (S.view === 'shop') list = list.filter((n) => n.data.kind === 'shop');
     else if (S.view !== 'all') list = list.filter((n) => n.data.folder === S.view);
   }
   if (S.search) {
@@ -312,7 +315,7 @@ function cardHtml(n) {
     <div class="c-prev">${esc(d.title ? preview : preview.split('\n').slice(1).join('\n'))}</div>
     <div class="c-foot">
       <span>${fmtDate(S.sort === 'created' ? d.created_at || n.updated_at : editedAt(n))}</span>
-      ${total ? `<span>· ☑ ${checked}/${total}</span>` : ''}
+      ${d.kind === 'shop' ? `<span>· 🛒 ${total - checked} à acheter</span>` : total ? `<span>· ☑ ${checked}/${total}</span>` : ''}
       ${folder ? `<span>· ${esc(folderEmoji(folder))} ${esc(folder.data.name)}</span>` : ''}
     </div>
     ${d.pinned ? `<i class="c-badge" data-i="pin">${svg('pin')}</i>` : d.fav ? `<i class="c-badge" data-i="star">${svg('star')}</i>` : ''}
@@ -375,6 +378,7 @@ function renderDrawer() {
   $('#drawerList').innerHTML =
     item('all', 'notes', 'Toutes les notes', all.length) +
     item('fav', 'star', 'Favoris', count((n) => n.data.fav)) +
+    item('shop', 'cart', 'Listes de courses', count((n) => n.data.kind === 'shop')) +
     `<div class="drawer-sep"></div><div class="drawer-label">Dossiers</div>` +
     folders().map((f) => item(f.id, 'folder', f.data.name, count((n) => n.data.folder === f.id), f)).join('') +
     `<div class="drawer-sep"></div>` +
@@ -905,7 +909,7 @@ const ed = { root: $('#editor'), title: $('#edTitle'), body: $('#edBody') };
 const commitDebounced = debounce(() => commitEditor(), 500);
 
 function newNote(prefill = {}) {
-  const folder = !['all', 'fav', 'trash'].includes(S.view) ? S.view : null;
+  const folder = !['all', 'fav', 'trash', 'shop'].includes(S.view) ? S.view : null;
   const it = { id: uid(), type: 'note', deleted: false, updated_at: Date.now(), dirty: false,
     data: { title: '', html: '', text: '', order: Math.min(0, ...notes().map((n) => n.data.order ?? 0)) - 1000, folder, color: 'default', fav: S.view === 'fav', pinned: false, trashed: false, created_at: Date.now(), ...prefill } };
   S.items.set(it.id, it);
@@ -935,7 +939,8 @@ function fillEditor(it) {
   ed.title.value = it.data.title || '';
   ed.body.innerHTML = it.data.html || '';
   setFreeMode(!!it.data.free);
-  ed.root.className = 'editor c-' + (it.data.color || 'default');
+  ed.root.className = 'editor c-' + (it.data.color || 'default') + (it.data.kind === 'shop' ? ' is-shop' : '');
+  if (it.data.kind === 'shop') renderShop(it, true);
   updateEditorMeta(it);
   relayout();
 }
@@ -950,6 +955,7 @@ function refreshEditorFromRemote() {
   const it = S.items.get(S.editing);
   if (!it || it.deleted) { toast('Cette note a été supprimée sur un autre appareil'); closeEditor(); return; }
   if (S.edPending) return; // modifications locales en cours : elles gagneront
+  if (it.data.kind === 'shop') { if (document.activeElement !== ed.title) ed.title.value = it.data.title || ''; renderShop(it); updateEditorMeta(it); return; }
   if (it.data.html !== ed.body.innerHTML || it.data.title !== ed.title.value) fillEditor(it);
   else updateEditorMeta(it);
 }
@@ -960,8 +966,12 @@ async function commitEditor() {
   const it = S.items.get(S.editing);
   if (!it || !S.edPending) return;
   S.edPending = false;
-  const html = cleanHtml(ed.body.innerHTML);
   const title = ed.title.value.trim();
+  if (it.data.kind === 'shop') { // liste de courses : seul le titre vient du champ, le contenu est géré par la liste
+    if (title !== (it.data.title || '')) { await saveItem({ ...it, data: { ...it.data, title, edited_at: Date.now() } }); updateEditorMeta(); render(); }
+    return;
+  }
+  const html = cleanHtml(ed.body.innerHTML);
   if (title === it.data.title && html === it.data.html && !!it.data.free === isFree()) return;
   const text = ed.body.innerText.replace(/ /g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 4000);
   if (!S.edSaved && !title && !text && !/<img/.test(html)) return; // note neuve encore vide
@@ -993,7 +1003,12 @@ window.addEventListener('popstate', () => {
 });
 
 ed.title.addEventListener('input', markDirty);
-ed.title.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); ed.body.focus(); placeCaretStart(ed.body); } });
+ed.title.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  if (ed.root.classList.contains('is-shop')) { $('#shopInput')?.focus(); return; }
+  ed.body.focus(); placeCaretStart(ed.body);
+});
 ed.body.addEventListener('input', markDirty);
 ed.body.addEventListener('focusin', () => document.execCommand('defaultParagraphSeparator', false, 'div'));
 
@@ -1190,6 +1205,199 @@ function editorMore() {
     if (a === 'purge') { if (await confirmBox('Supprimer définitivement ?', 'Cette action est irréversible.')) { await tombstone(cur.id); ed.root.hidden = true; S.editing = null; if (history.state?.editor) goBack(); render(); } return; }
     updateEditorMeta(); render();
   });
+}
+
+/* ================= Listes de courses =================
+   Note de type « shop » : data.items = [{id, name, cat, qty, done}], data.custom = produits ajoutés à la main.
+   Le HTML (liste cochable) et le texte sont générés à partir des articles : recherche, aperçu,
+   widget Android et export fonctionnent comme pour une note normale. */
+const SHOP_CATS = [
+  ['fruits', '🥦', 'Fruits & légumes', 'Pommes, Poires, Bananes, Oranges, Clémentines, Citrons, Fraises, Raisin, Kiwis, Avocats, Tomates, Salade, Concombre, Carottes, Pommes de terre, Oignons, Échalotes, Ail, Courgettes, Aubergines, Poivrons, Champignons, Poireaux, Brocolis, Haricots verts, Épinards, Persil, Basilic'],
+  ['cremerie', '🧀', 'Crèmerie & œufs', 'Lait, Beurre, Œufs, Yaourts, Crème fraîche, Fromage blanc, Fromage râpé, Emmental, Comté, Camembert, Mozzarella, Chèvre, Parmesan, Desserts lactés'],
+  ['viande', '🥩', 'Viande & poisson', 'Poulet, Steak haché, Bœuf, Porc, Jambon, Lardons, Saucisses, Charcuterie, Saumon, Cabillaud, Thon, Crevettes'],
+  ['pain', '🥖', 'Boulangerie', 'Pain, Baguette, Pain de mie, Croissants, Brioche, Biscottes'],
+  ['sale', '🍝', 'Épicerie salée', 'Pâtes, Riz, Semoule, Lentilles, Farine, Sel, Poivre, Épices, Huile d’olive, Huile, Vinaigre, Moutarde, Mayonnaise, Ketchup, Sauce tomate, Tomates pelées, Thon en boîte, Maïs, Bouillon, Chips, Olives'],
+  ['sucre', '🍪', 'Épicerie sucrée', 'Café, Thé, Chocolat, Cacao, Céréales, Confiture, Miel, Pâte à tartiner, Sucre, Biscuits, Compote, Levure'],
+  ['surgeles', '🧊', 'Surgelés', 'Légumes surgelés, Frites, Pizza, Poisson pané, Glaces'],
+  ['boissons', '🥤', 'Boissons', 'Eau, Eau gazeuse, Jus d’orange, Jus de fruits, Soda, Sirop, Bière, Vin, Lait d’amande'],
+  ['hygiene', '🧴', 'Hygiène & beauté', 'Papier toilette, Mouchoirs, Dentifrice, Brosse à dents, Shampoing, Gel douche, Savon, Déodorant, Coton, Rasoirs, Crème hydratante'],
+  ['entretien', '🧽', 'Entretien', 'Liquide vaisselle, Pastilles lave-vaisselle, Lessive, Adoucissant, Éponges, Sacs poubelle, Essuie-tout, Nettoyant multi-usage, Javel, Papier aluminium, Film alimentaire, Piles, Ampoules'],
+  ['bebe', '🍼', 'Bébé', 'Couches, Lingettes, Petits pots, Lait infantile'],
+  ['animaux', '🐾', 'Animaux', 'Croquettes, Pâtée, Litière, Friandises'],
+  ['divers', '📦', 'Divers', ''],
+].map(([id, emoji, name, list]) => ({ id, emoji, name, items: list ? list.split(', ') : [] }));
+const SHOP_CAT = Object.fromEntries(SHOP_CATS.map((c) => [c.id, c]));
+const normName = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[’']/g, ' ')
+  .replace(/œ/g, 'oe').replace(/\s+/g, ' ').trim().replace(/(s|x)$/, '');
+// catalogue = produits prédéfinis + produits ajoutés à la main (toutes listes confondues)
+function shopCatalog() {
+  const out = [], seen = new Set();
+  const add = (name, cat, custom) => { const k = normName(name); if (!k || seen.has(k)) return; seen.add(k); out.push({ name, cat, custom }); };
+  for (const n of notes()) for (const c of n.data.custom || []) add(c.name, SHOP_CAT[c.cat] ? c.cat : 'divers', true);
+  for (const c of SHOP_CATS) for (const name of c.items) add(name, c.id, false);
+  return out;
+}
+const findProduct = (name) => { const k = normName(name); return shopCatalog().find((p) => normName(p.name) === k) || null; };
+function parseShopInput(raw) {
+  let txt = String(raw || '').trim(), qty = '';
+  const m = /^(\d+(?:[.,]\d+)?\s*(?:kg|g|l|cl|ml|x|pcs?|paquets?|boîtes?|bouteilles?|packs?)?\.?)\s+(.+)$/i.exec(txt)
+    || /^(.+?)\s+(?:x\s*)?(\d+(?:[.,]\d+)?\s*(?:kg|g|l|cl|ml)?)$/i.exec(txt);
+  if (m) { if (/^\d/.test(m[1])) { qty = m[1].trim(); txt = m[2]; } else { txt = m[1]; qty = m[2].trim(); } }
+  return { name: txt.trim(), qty };
+}
+function shopDerive(items) {
+  const order = (i) => SHOP_CATS.findIndex((c) => c.id === i.cat);
+  const sorted = [...items].sort((a, b) => (a.done - b.done) || (order(a) - order(b)) || a.name.localeCompare(b.name, 'fr'));
+  const label = (i) => i.name + (i.qty ? ` (${i.qty})` : '');
+  return {
+    html: sorted.length ? `<ul class="checklist">${sorted.map((i) => `<li data-checked="${i.done ? 'true' : 'false'}">${esc(label(i))}</li>`).join('')}</ul>` : '',
+    text: sorted.filter((i) => !i.done).map(label).join('\n') + (sorted.some((i) => i.done) ? `\n✓ ${sorted.filter((i) => i.done).map((i) => i.name).join(', ')}` : ''),
+  };
+}
+async function saveShop(mutate) {
+  const it = S.items.get(S.editing); if (!it || it.data.kind !== 'shop') return;
+  const data = { ...it.data, items: (it.data.items || []).map((x) => ({ ...x })), custom: [...(it.data.custom || [])] };
+  mutate(data);
+  Object.assign(data, shopDerive(data.items), { edited_at: Date.now() });
+  const saved = await saveItem({ ...it, data });
+  S.edSaved = true;
+  renderShop(saved); updateEditorMeta(); render();
+}
+function newShop() {
+  const n = notes().filter((x) => x.data.kind === 'shop').length;
+  const it = { id: uid(), type: 'note', deleted: false, updated_at: Date.now(), dirty: false,
+    data: { kind: 'shop', title: n ? `Liste de courses ${n + 1}` : 'Liste de courses', items: [], custom: [], html: '', text: '',
+      order: Math.min(0, ...notes().map((x) => x.data.order ?? 0)) - 1000, folder: null, color: 'green', fav: false, pinned: false,
+      trashed: false, created_at: Date.now(), edited_at: Date.now() } };
+  S.items.set(it.id, it);
+  saveItem(it).then(() => render());
+  openEditor(it.id, false);
+  setTimeout(() => $('#shopInput')?.focus(), 80);
+}
+function addShopItem(raw, catHint) {
+  const { name, qty } = parseShopInput(raw);
+  if (!name) return;
+  const prod = findProduct(name);
+  const cat = prod?.cat || catHint || 'divers';
+  const finalName = prod?.name || name.charAt(0).toUpperCase() + name.slice(1);
+  saveShop((d) => {
+    const ex = d.items.find((i) => normName(i.name) === normName(finalName));
+    if (ex) { ex.done = false; if (qty) ex.qty = qty; toast(`${ex.name} : déjà dans la liste`); }
+    else d.items.push({ id: uid(), name: finalName, cat, qty, done: false });
+    if (!prod) d.custom.push({ name: finalName, cat }); // nouveau produit : il rejoint le catalogue
+  });
+}
+function renderShop(it, full = false) {
+  const box = $('#shopUI'); if (!box) return;
+  if (full || !box.firstChild) {
+    box.innerHTML = `<div class="shop-add">
+        <input id="shopInput" type="text" placeholder="Ajouter un article (ex. 2 baguettes)" autocomplete="off" enterkeyhint="done">
+        <button class="btn-text shop-cat-btn" data-shop="catalog">${ic('notes')}<span>Catalogue</span></button>
+      </div>
+      <div id="shopSuggest" class="shop-suggest"></div>
+      <div id="shopList" class="shop-list"></div>`;
+    hydrateIcons(box);
+    const inp = $('#shopInput');
+    inp.addEventListener('input', () => renderShopSuggest(inp.value));
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addShopItem(inp.value); inp.value = ''; renderShopSuggest(''); } });
+  }
+  const items = it.data.items || [];
+  const todo = items.filter((i) => !i.done), done = items.filter((i) => i.done);
+  const row = (i) => `<div class="shop-item${i.done ? ' done' : ''}" data-sid="${esc(i.id)}">
+      <span class="shop-check"></span><span class="shop-name">${esc(i.name)}</span>
+      <button class="shop-qty${i.qty ? '' : ' noqty'}" data-shop="item">${i.qty ? esc(i.qty) : '＋'}</button></div>`;
+  let html = '';
+  for (const c of SHOP_CATS) {
+    const list = todo.filter((i) => (SHOP_CAT[i.cat] ? i.cat : 'divers') === c.id).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+    if (list.length) html += `<div class="shop-cat"><span>${c.emoji}</span>${esc(c.name)}<small>${list.length}</small></div>` + list.map(row).join('');
+  }
+  if (!todo.length) html += `<div class="shop-empty">${items.length ? '🎉 Tout est dans le panier !' : 'Liste vide : tapez un article ci-dessus ou ouvrez le catalogue.'}</div>`;
+  if (done.length) html += `<div class="shop-done-head"><span>Dans le panier (${done.length})</span><button class="btn-text" data-shop="clear">Retirer de la liste</button></div>` + done.map(row).join('');
+  $('#shopList').innerHTML = html;
+}
+function renderShopSuggest(q) {
+  const box = $('#shopSuggest'); const k = normName(parseShopInput(q).name);
+  if (!k) { box.innerHTML = ''; return; }
+  const it = S.items.get(S.editing), inList = new Set((it?.data.items || []).filter((i) => !i.done).map((i) => normName(i.name)));
+  const hits = shopCatalog().filter((p) => normName(p.name).includes(k) && !inList.has(normName(p.name)))
+    .sort((a, b) => normName(a.name).indexOf(k) - normName(b.name).indexOf(k)).slice(0, 8);
+  box.innerHTML = hits.map((p) => `<button class="shop-chip" data-sugg="${esc(p.name)}">${SHOP_CAT[p.cat]?.emoji || '📦'} ${esc(p.name)}</button>`).join('')
+    + (findProduct(q) ? '' : `<button class="shop-chip new" data-sugg="__new">＋ « ${esc(parseShopInput(q).name)} »</button>`);
+}
+$('#shopUI')?.addEventListener('click', (e) => {
+  const sug = e.target.closest('[data-sugg]');
+  if (sug) {
+    const inp = $('#shopInput'); const { qty } = parseShopInput(inp.value);
+    addShopItem(sug.dataset.sugg === '__new' ? inp.value : (qty ? qty + ' ' : '') + sug.dataset.sugg);
+    inp.value = ''; renderShopSuggest(''); inp.focus(); return;
+  }
+  const act = e.target.closest('[data-shop]')?.dataset.shop;
+  const row = e.target.closest('.shop-item');
+  if (act === 'catalog') return shopCatalogSheet();
+  if (act === 'clear') return saveShop((d) => { d.items = d.items.filter((i) => !i.done); });
+  if (act === 'item' && row) return shopItemSheet(row.dataset.sid);
+  if (row) { navigator.vibrate?.(10); return saveShop((d) => { const i = d.items.find((x) => x.id === row.dataset.sid); if (i) i.done = !i.done; }); }
+});
+function shopCatalogSheet() {
+  let tab = 0;
+  const paint = (card) => {
+    const it = S.items.get(S.editing), inList = new Set((it?.data.items || []).filter((i) => !i.done).map((i) => normName(i.name)));
+    const cat = SHOP_CATS[tab], prods = shopCatalog().filter((p) => p.cat === cat.id);
+    card.querySelector('.emoji-tabs').innerHTML = SHOP_CATS.map((c, i) => `<button data-tab="${i}" class="${i === tab ? 'on' : ''}">${c.emoji} ${esc(c.name)}</button>`).join('');
+    card.querySelector('.shop-catalog').innerHTML = prods.length
+      ? prods.map((p) => `<span class="shop-chip${inList.has(normName(p.name)) ? ' on' : ''}" data-prod="${esc(p.name)}">${inList.has(normName(p.name)) ? '✓ ' : ''}${esc(p.name)}${p.custom ? `<b data-forget="${esc(p.name)}" title="Retirer du catalogue">×</b>` : ''}</span>`).join('')
+      : '<p class="muted">Aucun produit. Les articles que vous tapez et qui ne sont pas dans le catalogue sont ajoutés ici automatiquement.</p>';
+    card.querySelector('.emoji-tabs [data-tab="' + tab + '"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  };
+  const card = openSheet(`<h3>Catalogue</h3><div class="emoji-tabs"></div><div class="shop-catalog"></div>
+    <p class="muted">Touchez un produit pour l’ajouter ou le retirer de la liste.</p>
+    <div class="sheet-actions"><button class="btn-text" data-x>Terminé</button></div>`, async (e) => {
+    const t = e.target.closest('[data-tab]'); if (t) { tab = +t.dataset.tab; return paint(card); }
+    if (e.target.closest('[data-x]')) return closeSheet();
+    const fg = e.target.closest('[data-forget]');
+    if (fg) {
+      const k = normName(fg.dataset.forget);
+      for (const n of notes().filter((x) => (x.data.custom || []).some((c) => normName(c.name) === k))) {
+        await updateNote(n.id, { custom: n.data.custom.filter((c) => normName(c.name) !== k) });
+      }
+      return paint(card);
+    }
+    const pr = e.target.closest('[data-prod]'); if (!pr) return;
+    const name = pr.dataset.prod, k = normName(name);
+    await saveShop((d) => {
+      const ex = d.items.find((i) => normName(i.name) === k);
+      if (ex && !ex.done) d.items = d.items.filter((i) => i !== ex);
+      else if (ex) ex.done = false;
+      else d.items.push({ id: uid(), name, cat: SHOP_CATS[tab].id, qty: '', done: false });
+    });
+    paint(card);
+  });
+  paint(card);
+}
+function shopItemSheet(sid) {
+  const it = S.items.get(S.editing); const item = it?.data.items?.find((i) => i.id === sid); if (!item) return;
+  let cat = SHOP_CAT[item.cat] ? item.cat : 'divers';
+  const card = openSheet(`<h3>Article</h3><form>
+      <input type="text" name="name" value="${esc(item.name)}" placeholder="Nom">
+      <input type="text" name="qty" value="${esc(item.qty || '')}" placeholder="Quantité (ex. 2, 500 g, 1 pack)">
+      <div class="drawer-label">Rayon</div><div class="shop-rayons">${SHOP_CATS.map((c) => `<button type="button" class="shop-chip${c.id === cat ? ' on' : ''}" data-cat="${c.id}">${c.emoji} ${esc(c.name)}</button>`).join('')}</div>
+      <div class="sheet-actions"><button type="button" class="btn-text danger-text" data-del>Supprimer</button><span class="spacer"></span><button class="btn-text">OK</button></div>
+    </form>`, (e) => {
+    const c = e.target.closest('[data-cat]');
+    if (c) { cat = c.dataset.cat; card.querySelectorAll('[data-cat]').forEach((b) => b.classList.toggle('on', b === c)); return; }
+    if (e.target.closest('[data-del]')) { closeSheet(); saveShop((d) => { d.items = d.items.filter((i) => i.id !== sid); }); }
+  });
+  card.querySelector('form').onsubmit = (e) => {
+    e.preventDefault();
+    const f = e.target, name = f.name.value.trim(), qty = f.qty.value.trim();
+    closeSheet();
+    saveShop((d) => {
+      const i = d.items.find((x) => x.id === sid); if (!i) return;
+      if (name) i.name = name; i.qty = qty;
+      if (i.cat !== cat) { i.cat = cat; d.custom = d.custom.filter((x) => normName(x.name) !== normName(i.name)); d.custom.push({ name: i.name, cat }); }
+    });
+  };
+  setTimeout(() => card.querySelector('[name=qty]').focus(), 60);
 }
 
 /* ================= Blocs déplaçables dans une note =================
@@ -1593,7 +1801,7 @@ document.addEventListener('click', async (e) => {
     case 'drawer': return openDrawer();
     case 'settings': return settingsMenu();
     case 'new-folder': { closeDrawer(); const f = await createFolder(); if (f) setView(f.id); return; }
-    case 'new-note': return newNote();
+    case 'new-note': return S.view === 'shop' ? newShop() : newNote();
     case 'search': return toggleSearch(true);
     case 'layout': S.layout = S.layout === 'grid' ? 'list' : 'grid'; pref.set('layout', S.layout); return render();
     case 'sort': return sortMenu();
@@ -1700,7 +1908,7 @@ async function init() {
   hydrateIcons();
   applyTheme();
   for (const it of await DB.all()) S.items.set(it.id, it);
-  if (!['all', 'fav', 'trash'].includes(S.view) && !folderById(S.view)) S.view = 'all';
+  if (!['all', 'fav', 'trash', 'shop'].includes(S.view) && !folderById(S.view)) S.view = 'all';
   await purgeTrash();
   render();
   if (!S.token) { showLogin(); setSync('off'); } else sync();

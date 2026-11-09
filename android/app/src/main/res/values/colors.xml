@@ -6,11 +6,11 @@
     <color name="w_text2">#6B6B6B</color>
     <color name="w_accent">#F26A2E</color>
     <color name="n_default">#FFFFFF</color>
-    <color name="n_yellow">#FFF6C8</color>
-    <color name="n_green">#DDF3DC</color>
-    <color name="n_blue">#DBEAFD</color>
-    <color name="n_purple">#EBE1FB</color>
-    <color name="n_pink">#FDE0EA</color>
-    <color name="n_orange">#FFE4CF</color>
-    <color name="n_gray">#E9E9E9</color>
+    <color name="n_yellow">#FFE58A</color>
+    <color name="n_green">#B5E8B0</color>
+    <color name="n_blue">#B3D4FF</color>
+    <color name="n_purple">#D6C2FF</color>
+    <color name="n_pink">#FFBCD3</color>
+    <color name="n_orange">#FFC999</color>
+    <color name="n_gray">#D9D9D9</color>
 </resources>
