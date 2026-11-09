@@ -38,6 +38,7 @@ const ICONS = {
   indent: 'M3 21h18v-2H3v2zM3 8v8l4-4-4-4zm8 9h10v-2H11v2zM3 3v2h18V3H3zm8 6h10V7H11v2zm0 4h10v-2H11v2z',
   outdent: 'M11 17h10v-2H11v2zm-8-5 4 4V8l-4 4zm0 9h18v-2H3v2zM3 3v2h18V3H3zm8 6h10V7H11v2zm0 4h10v-2H11v2z',
   hr: 'M4 11h16v2H4z',
+  add: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z',
   cart: 'M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1.003 1.003 0 0 0 20 4H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z',
   freePage: 'M3 3h8v6H3V3zm10 0h8v10h-8V3zM3 11h8v10H3V11zm10 4h8v6h-8v-6z',
   block: 'M19 3H5c-1.1 0-2 .9-2 2v6h18V5c0-1.1-.9-2-2-2zM3 19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-6H3v6z',
@@ -1290,16 +1291,25 @@ function addShopItem(raw, catHint) {
 function renderShop(it, full = false) {
   const box = $('#shopUI'); if (!box) return;
   if (full || !box.firstChild) {
-    box.innerHTML = `<div class="shop-add">
-        <input id="shopInput" type="text" placeholder="Ajouter un article (ex. 2 baguettes)" autocomplete="off" enterkeyhint="done">
-        <button class="btn-text shop-cat-btn" data-shop="catalog">${ic('notes')}<span>Catalogue</span></button>
-      </div>
+    // <form> : la touche « Entrée / OK » des claviers Android déclenche toujours l'envoi d'un formulaire
+    box.innerHTML = `<form class="shop-add" id="shopForm" autocomplete="off">
+        <input id="shopInput" type="text" placeholder="Ajouter un article (ex. 2 baguettes)" autocomplete="off" autocapitalize="sentences" enterkeyhint="enter">
+        <button type="submit" class="shop-add-btn" id="shopAddBtn" title="Ajouter" hidden>${ic('add')}</button>
+        <button type="button" class="btn-text shop-cat-btn" data-shop="catalog">${ic('notes')}<span>Catalogue</span></button>
+      </form>
       <div id="shopSuggest" class="shop-suggest"></div>
       <div id="shopList" class="shop-list"></div>`;
     hydrateIcons(box);
     const inp = $('#shopInput');
-    inp.addEventListener('input', () => renderShopSuggest(inp.value));
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addShopItem(inp.value); inp.value = ''; renderShopSuggest(''); } });
+    const submit = () => {
+      const v = inp.value.trim(); if (!v) return;
+      addShopItem(v); inp.value = ''; renderShopSuggest(''); $('#shopAddBtn').hidden = true; inp.focus();
+    };
+    inp.addEventListener('input', () => { renderShopSuggest(inp.value); $('#shopAddBtn').hidden = !inp.value.trim(); });
+    $('#shopForm').addEventListener('submit', (e) => { e.preventDefault(); submit(); });
+    // claviers qui envoient Entrée sans soumettre (ou pendant la saisie prédictive)
+    inp.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.keyCode === 13) && !e.isComposing) { e.preventDefault(); submit(); } });
+    inp.addEventListener('beforeinput', (e) => { if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') { e.preventDefault(); submit(); } });
   }
   const items = it.data.items || [];
   const todo = items.filter((i) => !i.done), done = items.filter((i) => i.done);
@@ -1348,9 +1358,11 @@ function shopCatalogSheet() {
       ? prods.map((p) => `<span class="shop-chip${inList.has(normName(p.name)) ? ' on' : ''}" data-prod="${esc(p.name)}">${inList.has(normName(p.name)) ? '✓ ' : ''}${esc(p.name)}${p.custom ? `<b data-forget="${esc(p.name)}" title="Retirer du catalogue">×</b>` : ''}</span>`).join('')
       : '<p class="muted">Aucun produit. Les articles que vous tapez et qui ne sont pas dans le catalogue sont ajoutés ici automatiquement.</p>';
     card.querySelector('.emoji-tabs [data-tab="' + tab + '"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+    card.querySelector('.shop-newprod input').placeholder = `Nouveau produit dans « ${cat.name} »…`;
   };
   const card = openSheet(`<h3>Catalogue</h3><div class="emoji-tabs"></div><div class="shop-catalog"></div>
-    <p class="muted">Touchez un produit pour l’ajouter ou le retirer de la liste.</p>
+    <form class="shop-newprod" autocomplete="off"><input type="text" name="prod" placeholder="Nouveau produit…" enterkeyhint="enter"><button class="btn-text">Créer</button></form>
+    <p class="muted">Touchez un produit pour l’ajouter ou le retirer de la liste. Un produit créé ici est rangé dans le rayon affiché et mémorisé pour vos prochaines listes.</p>
     <div class="sheet-actions"><button class="btn-text" data-x>Terminé</button></div>`, async (e) => {
     const t = e.target.closest('[data-tab]'); if (t) { tab = +t.dataset.tab; return paint(card); }
     if (e.target.closest('[data-x]')) return closeSheet();
@@ -1371,6 +1383,21 @@ function shopCatalogSheet() {
       else d.items.push({ id: uid(), name, cat: SHOP_CATS[tab].id, qty: '', done: false });
     });
     paint(card);
+  });
+  card.querySelector('.shop-newprod').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const inp = e.target.prod, { name: raw, qty } = parseShopInput(inp.value);
+    if (!raw) return;
+    const known = findProduct(raw), cat = SHOP_CATS[tab].id;
+    const name = known?.name || raw.charAt(0).toUpperCase() + raw.slice(1);
+    await saveShop((d) => {
+      const ex = d.items.find((i) => normName(i.name) === normName(name));
+      if (ex) { ex.done = false; if (qty) ex.qty = qty; }
+      else d.items.push({ id: uid(), name, cat: known?.cat || cat, qty, done: false });
+      if (!known) d.custom.push({ name, cat });
+    });
+    toast(known ? `${name} ajouté à la liste` : `${name} créé dans « ${SHOP_CATS[tab].name} » et ajouté à la liste`);
+    inp.value = ''; paint(card); inp.focus();
   });
   paint(card);
 }
