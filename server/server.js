@@ -1,7 +1,13 @@
 'use strict';
 /*
- * ALBANOTES — serveur de notes auto-hébergé
+ * ALBANOTES — serveur de notes auto-hébergé, multi-utilisateurs
  * Zéro dépendance : Node >= 22 (http + node:sqlite + crypto)
+ *
+ * - Chaque utilisateur a ses notes et ses dossiers, privés.
+ * - Une note peut être partagée avec tout le monde ou avec des personnes choisies ;
+ *   les personnes qui y ont accès peuvent la modifier.
+ * - Les listes de courses sont toujours communes ; elles sont fusionnées article par article.
+ * - Dossier, favori, épingle et ordre restent personnels, même sur une note partagée.
  */
 const http = require('node:http');
 const fs = require('node:fs');
@@ -16,9 +22,11 @@ const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const VERSION = fs.readFileSync(path.join(ROOT, 'VERSION'), 'utf8').trim();
 const MAX_BODY = 50 * 1024 * 1024; // 50 Mo (images et croquis inclus dans les notes)
+const PERSONAL = ['folder', 'fav', 'pinned', 'order']; // champs propres à chaque utilisateur
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
-const db = new DatabaseSync(path.join(DATA_DIR, 'carnet.db'));
+const DB_FILE = path.join(DATA_DIR, 'carnet.db');
+const db = new DatabaseSync(DB_FILE);
 // attendre jusqu'à 10 s si la base est verrouillée (service + commande carnet simultanés)
 db.exec('PRAGMA busy_timeout = 10000');
 db.exec(`
@@ -40,6 +48,25 @@ db.exec(`
     agent TEXT
   );
   CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    pw TEXT NOT NULL,
+    admin INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS item_shares (
+    item_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    PRIMARY KEY (item_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS item_shares_user ON item_shares(user_id);
+  CREATE TABLE IF NOT EXISTS item_meta (
+    user_id INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    data TEXT NOT NULL,
+    PRIMARY KEY (user_id, item_id)
+  );
 `);
 
 const kvGet = db.prepare('SELECT v FROM kv WHERE k = ?');
@@ -62,14 +89,87 @@ function verifyPassword(pw, stored) {
 }
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
-/* ---------- CLI : node server.js passwd | revoke ---------- */
+/* ---------- migration vers le multi-utilisateurs (une seule fois, sans perte) ---------- */
+function columns(table) { return db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name); }
+function migrate() {
+  const needItems = !columns('items').includes('owner');
+  const needSessions = !columns('sessions').includes('user_id');
+  const noUsers = db.prepare('SELECT COUNT(*) n FROM users').get().n === 0;
+  const oldPw = getKV('password');
+  if (!needItems && !needSessions && !(noUsers && oldPw)) return;
+  // sauvegarde de la base avant toute modification de structure
+  const hasData = db.prepare('SELECT COUNT(*) n FROM items').get().n > 0;
+  if (hasData) {
+    const dir = path.join(DATA_DIR, 'backups');
+    fs.mkdirSync(dir, { recursive: true });
+    const f = path.join(dir, `avant-multi-utilisateurs-${new Date().toISOString().replace(/[:.]/g, '-')}.db`); // hors rotation des sauvegardes quotidiennes
+    db.exec(`VACUUM INTO '${f.replace(/'/g, "''")}'`);
+    console.log('Sauvegarde avant migration :', f);
+  }
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if (needItems) {
+      db.exec('ALTER TABLE items ADD COLUMN owner INTEGER');
+      db.exec('ALTER TABLE items ADD COLUMN shared INTEGER NOT NULL DEFAULT 0');
+    }
+    if (needSessions) db.exec('ALTER TABLE sessions ADD COLUMN user_id INTEGER');
+    if (noUsers && oldPw) {
+      // l'ancien mot de passe unique devient le compte administrateur « admin »
+      db.prepare('INSERT INTO users(name, pw, admin, created_at) VALUES(?, ?, 1, ?)').run('admin', oldPw, Date.now());
+      db.prepare("DELETE FROM kv WHERE k = 'password'").run();
+    }
+    const admin = db.prepare('SELECT id FROM users WHERE admin = 1 ORDER BY id LIMIT 1').get();
+    if (admin) {
+      db.prepare('UPDATE items SET owner = ? WHERE owner IS NULL').run(admin.id);
+      db.prepare('UPDATE sessions SET user_id = ? WHERE user_id IS NULL').run(admin.id); // appareils toujours connectés
+    }
+    db.exec("UPDATE items SET shared = 1 WHERE type = 'note' AND data IS NOT NULL AND json_extract(data, '$.kind') = 'shop'");
+    db.exec('COMMIT');
+    console.log('Base migrée vers le multi-utilisateurs.');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+}
+migrate();
+db.exec('CREATE INDEX IF NOT EXISTS items_owner ON items(owner)');
+
+/* ---------- utilisateurs ---------- */
+const qUserByName = db.prepare('SELECT * FROM users WHERE name = ?');
+const qUserById = db.prepare('SELECT * FROM users WHERE id = ?');
+const qUsers = db.prepare(`SELECT u.id, u.name, u.admin, u.created_at,
+  (SELECT COUNT(*) FROM items i WHERE i.owner = u.id AND i.type = 'note' AND i.deleted = 0) AS notes
+  FROM users u ORDER BY u.name COLLATE NOCASE`);
+const qUserCount = db.prepare('SELECT COUNT(*) n FROM users');
+const qAdminCount = db.prepare('SELECT COUNT(*) n FROM users WHERE admin = 1');
+const userNames = () => new Map(db.prepare('SELECT id, name FROM users').all().map((u) => [u.id, u.name]));
+const publicUser = (u) => ({ id: u.id, name: u.name, admin: !!u.admin });
+function validName(n) { return typeof n === 'string' && /^[\p{L}\p{N} ._-]{1,32}$/u.test(n.trim()); }
+function validPw(p) { return typeof p === 'string' && p.length >= 4 && p.length <= 200; }
+
+/* ---------- CLI : node server.js passwd [nom] | users | revoke ---------- */
 const cmd = process.argv[2];
 if (cmd === 'passwd') {
   const input = fs.readFileSync(0, 'utf8').split('\n')[0].trim();
-  if (input.length < 4) { console.error('Mot de passe trop court (4 caractères min).'); process.exit(1); }
-  setKV('password', hashPassword(input));
-  db.exec('DELETE FROM sessions');
-  console.log('Mot de passe défini. Toutes les sessions ont été déconnectées.');
+  if (!validPw(input)) { console.error('Mot de passe trop court (4 caractères min).'); process.exit(1); }
+  const wanted = (process.argv[3] || '').trim();
+  let u = wanted ? qUserByName.get(wanted) : db.prepare('SELECT * FROM users WHERE admin = 1 ORDER BY id LIMIT 1').get();
+  if (!u) {
+    const name = wanted || 'admin';
+    if (!validName(name)) { console.error('Nom invalide.'); process.exit(1); }
+    db.prepare('INSERT INTO users(name, pw, admin, created_at) VALUES(?, ?, 1, ?)').run(name, hashPassword(input), Date.now());
+    console.log(`Compte administrateur « ${name} » créé.`);
+  } else {
+    db.prepare('UPDATE users SET pw = ? WHERE id = ?').run(hashPassword(input), u.id);
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(u.id);
+    console.log(`Mot de passe de « ${u.name} » changé. Ses appareils sont déconnectés.`);
+  }
+  process.exit(0);
+}
+if (cmd === 'users') {
+  const list = qUsers.all();
+  if (!list.length) console.log('Aucun utilisateur.');
+  for (const u of list) console.log(`${u.admin ? '★' : ' '} ${u.name}  (${u.notes} notes)`);
   process.exit(0);
 }
 if (cmd === 'revoke') {
@@ -79,17 +179,31 @@ if (cmd === 'revoke') {
 }
 
 /* ---------- requêtes préparées ---------- */
-const qSessionGet = db.prepare('SELECT token_hash FROM sessions WHERE token_hash = ?');
+const qSessionGet = db.prepare('SELECT token_hash, user_id FROM sessions WHERE token_hash = ?');
 const qSessionTouch = db.prepare('UPDATE sessions SET last_seen = ? WHERE token_hash = ?');
-const qSessionAdd = db.prepare('INSERT INTO sessions(token_hash, created_at, last_seen, agent) VALUES(?, ?, ?, ?)');
+const qSessionAdd = db.prepare('INSERT INTO sessions(token_hash, created_at, last_seen, agent, user_id) VALUES(?, ?, ?, ?, ?)');
 const qSessionDel = db.prepare('DELETE FROM sessions WHERE token_hash = ?');
-const qItemGet = db.prepare('SELECT updated_at FROM items WHERE id = ?');
-const qItemUpsert = db.prepare(`
-  INSERT INTO items(id, type, data, updated_at, deleted, rev) VALUES(?, ?, ?, ?, ?, ?)
-  ON CONFLICT(id) DO UPDATE SET type = excluded.type, data = excluded.data,
-    updated_at = excluded.updated_at, deleted = excluded.deleted, rev = excluded.rev`);
-const qChangesSince = db.prepare('SELECT id, type, data, updated_at, deleted, rev FROM items WHERE rev > ? ORDER BY rev');
-const qStats = db.prepare("SELECT type, COUNT(*) AS n FROM items WHERE deleted = 0 GROUP BY type");
+const qItemFull = db.prepare('SELECT * FROM items WHERE id = ?');
+const qItemPut = db.prepare(`
+  INSERT INTO items(id, type, data, updated_at, deleted, rev, owner, shared) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(id) DO UPDATE SET type = excluded.type, data = excluded.data, updated_at = excluded.updated_at,
+    deleted = excluded.deleted, rev = excluded.rev, owner = excluded.owner, shared = excluded.shared`);
+const qChangesSince = db.prepare('SELECT * FROM items WHERE rev > ? ORDER BY rev');
+const qMetaGet = db.prepare('SELECT data FROM item_meta WHERE user_id = ? AND item_id = ?');
+const qMetaPut = db.prepare(`INSERT INTO item_meta(user_id, item_id, data) VALUES(?, ?, ?)
+  ON CONFLICT(user_id, item_id) DO UPDATE SET data = excluded.data`);
+const qStats = db.prepare(`SELECT type, COUNT(*) AS n FROM items
+  WHERE deleted = 0 AND (owner = ? OR (type = 'note' AND (shared = 1 OR id IN (SELECT item_id FROM item_shares WHERE user_id = ?)))) GROUP BY type`);
+const qShareHas = db.prepare('SELECT 1 FROM item_shares WHERE item_id = ? AND user_id = ?');
+const qSharesOf = db.prepare('SELECT user_id FROM item_shares WHERE item_id = ? ORDER BY user_id');
+const qShareDelItem = db.prepare('DELETE FROM item_shares WHERE item_id = ?');
+const qShareAdd = db.prepare('INSERT OR IGNORE INTO item_shares(item_id, user_id) VALUES(?, ?)');
+/** Note visible par l'utilisateur : la sienne, partagée avec tous, ou partagée avec lui. */
+const canSee = (user, r) => (r.owner ?? user.id) === user.id || (r.type === 'note' && (!!r.shared || !!qShareHas.get(r.id, user.id)));
+function setShares(itemId, ownerId, ids) {
+  qShareDelItem.run(itemId);
+  for (const id of new Set(ids.map(Number))) if (id !== ownerId && qUserById.get(id)) qShareAdd.run(itemId, id);
+}
 
 /* ---------- utilitaires HTTP ---------- */
 const MIME = {
@@ -160,9 +274,12 @@ function auth(req, body) {
   const tok = h.startsWith('Bearer ') ? h.slice(7) : typeof body?._token === 'string' ? body._token : '';
   if (!tok) return null;
   const th = sha256(tok);
-  if (!qSessionGet.get(th)) return null;
+  const s = qSessionGet.get(th);
+  if (!s) return null;
+  const user = s.user_id != null ? qUserById.get(s.user_id) : null;
+  if (!user) { qSessionDel.run(th); return null; }
   qSessionTouch.run(Date.now(), th);
-  return th;
+  return { th, user };
 }
 
 /* ---------- anti brute-force simple ---------- */
@@ -178,6 +295,102 @@ function loginFailed(ip) {
   failures.set(ip, f);
 }
 
+/* ---------- synchronisation ---------- */
+const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o && k in o).map((k) => [k, o[k]]));
+const omit = (o, keys) => Object.fromEntries(Object.entries(o || {}).filter(([k]) => !keys.includes(k)));
+const parse = (s) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
+const isShop = (d) => d && d.kind === 'shop';
+const normName = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+
+/** Fusion de deux versions d'une liste de courses, article par article (horodatage t de chaque article). */
+function mergeShop(a, ta, b, tb) {
+  const newer = tb >= ta ? b : a;
+  const removed = { ...(a.removed || {}) };
+  for (const [k, v] of Object.entries(b.removed || {})) removed[k] = Math.max(removed[k] || 0, Number(v) || 0);
+  const byId = new Map();
+  for (const it of [...(a.items || []), ...(b.items || [])]) {
+    if (!it || typeof it.id !== 'string') continue;
+    const ex = byId.get(it.id);
+    if (!ex || (Number(it.t) || 0) > (Number(ex.t) || 0)) byId.set(it.id, it);
+  }
+  const items = [...byId.values()].filter((it) => !(removed[it.id] && removed[it.id] >= (Number(it.t) || 0)));
+  const limit = Date.now() - 60 * 86400_000; // les traces d'articles retirés sont gardées 60 jours
+  for (const k of Object.keys(removed)) if (removed[k] < limit) delete removed[k];
+  const seen = new Set(), custom = [];
+  for (const c of [...(newer.custom || []), ...((newer === b ? a : b).custom || [])]) {
+    const k = normName(c?.name); if (!k || seen.has(k)) continue; seen.add(k); custom.push(c);
+  }
+  return { ...newer, items, removed, custom };
+}
+
+/** Applique une modification envoyée par un client ; renvoie true si la base a changé. */
+function applyChange(user, c, nextRev) {
+  if (!c || typeof c.id !== 'string' || c.id.length > 64 || !['note', 'folder'].includes(c.type)) return false;
+  const ts = Number(c.updated_at);
+  if (!Number.isFinite(ts)) return false;
+  const cur = qItemFull.get(c.id);
+  const incoming = c.deleted ? null : (c.data && typeof c.data === 'object' ? c.data : {});
+
+  if (!cur) { // nouvel élément : il appartient à son créateur
+    const shared = c.type === 'note' && (c.shared || isShop(incoming)) ? 1 : 0;
+    qItemPut.run(c.id, c.type, incoming ? JSON.stringify(incoming) : null, ts, c.deleted ? 1 : 0, nextRev(), user.id, shared);
+    if (c.type === 'note' && !shared && Array.isArray(c.shareWith)) setShares(c.id, user.id, c.shareWith);
+    return true;
+  }
+  if (cur.type !== c.type) return false;
+  const owner = cur.owner ?? user.id;
+  const isOwner = owner === user.id;
+  if (!isOwner && !canSee(user, cur)) return false; // note d'un autre qui ne m'est pas partagée : refusé
+
+  let data = incoming;
+  let meta = null;
+  if (!isOwner && incoming) {
+    // non-propriétaire : dossier, favori, épingle et ordre lui restent personnels
+    meta = pick(incoming, PERSONAL);
+    data = { ...omit(incoming, PERSONAL), ...pick(parse(cur.data) || {}, PERSONAL) };
+  }
+  const curData = parse(cur.data);
+  let updated = ts;
+  if (data && curData && isShop(data) && isShop(curData) && !cur.deleted) {
+    data = mergeShop(curData, cur.updated_at, data, ts); // aucune modification perdue sur une liste commune
+    updated = Math.max(ts, cur.updated_at) + 1;
+  } else if (cur.updated_at >= ts) {
+    // version du serveur plus récente : seul le réglage personnel est conservé
+    if (!meta) return false;
+    qMetaPut.run(user.id, c.id, JSON.stringify(meta));
+    qItemPut.run(cur.id, cur.type, cur.data, cur.updated_at + 1, cur.deleted, nextRev(), owner, cur.shared);
+    return true;
+  }
+  let shared = cur.shared;
+  if (isOwner && c.type === 'note' && typeof c.shared === 'boolean') shared = c.shared ? 1 : 0;
+  if (isShop(data)) shared = 1;
+  // seul le propriétaire choisit avec qui la note est partagée
+  if (isOwner && c.type === 'note' && Array.isArray(c.shareWith)) setShares(c.id, owner, shared ? [] : c.shareWith);
+  if (meta) qMetaPut.run(user.id, c.id, JSON.stringify(meta));
+  qItemPut.run(c.id, c.type, data ? JSON.stringify(data) : null, updated, c.deleted ? 1 : 0, nextRev(), owner, shared);
+  return true;
+}
+
+/** Ce que voit un utilisateur d'un élément ; null = rien à envoyer. */
+function viewFor(user, r, names) {
+  const owner = r.owner ?? user.id;
+  const mine = owner === user.id;
+  if (!mine && !canSee(user, r)) {
+    // plus visible (partage retiré, compte supprimé…) : on demande à l'appareil de l'oublier
+    return r.type === 'note' ? { id: r.id, type: r.type, updated_at: r.updated_at, deleted: true, gone: true } : null;
+  }
+  let data = parse(r.data);
+  if (data && !mine) {
+    const meta = parse(qMetaGet.get(user.id, r.id)?.data) || {};
+    data = { ...data, folder: null, fav: false, pinned: false, order: null, ...meta };
+  }
+  const shareWith = r.type === 'note' ? qSharesOf.all(r.id).map((x) => x.user_id) : [];
+  return {
+    id: r.id, type: r.type, updated_at: r.updated_at, deleted: !!r.deleted, data,
+    shared: !!r.shared, shareWith: mine ? shareWith : [], sharedWithMe: !mine, mine, owner: names.get(owner) || '?',
+  };
+}
+
 /* ---------- API ---------- */
 async function handleApi(req, res, pathname) {
   if (req.method === 'OPTIONS') { res.writeHead(204, { ...SEC_HEADERS, ...corsHeaders(req) }); return res.end(); }
@@ -187,39 +400,120 @@ async function handleApi(req, res, pathname) {
   if (pathname === '/api/login' && req.method === 'POST') {
     const ip = clientIp(req);
     if (loginBlocked(ip)) return send(res, 429, { error: 'Trop de tentatives, réessayez plus tard.' });
+    if (qUserCount.get().n === 0) return send(res, 503, { error: 'Aucun compte configuré. Lancez « carnet passwd » dans le conteneur.' });
     const { password } = body;
-    const stored = getKV('password');
-    if (!stored) return send(res, 503, { error: 'Aucun mot de passe configuré. Lancez « carnet passwd » dans le conteneur.' });
-    if (typeof password !== 'string' || !verifyPassword(password, stored)) {
+    let name = typeof body.username === 'string' ? body.username.trim() : '';
+    // ancienne interface sans identifiant : accepté tant qu'il n'existe qu'un seul compte
+    if (!name && qUserCount.get().n === 1) name = db.prepare('SELECT name FROM users').get().name;
+    const user = name ? qUserByName.get(name) : null;
+    if (typeof password !== 'string' || !user || !verifyPassword(password, user.pw)) {
       loginFailed(ip);
       await new Promise((r) => setTimeout(r, 600));
-      return send(res, 401, { error: 'Mot de passe incorrect.' });
+      return send(res, 401, { error: 'Identifiant ou mot de passe incorrect.' });
     }
     failures.delete(ip);
     const token = crypto.randomBytes(32).toString('base64url');
     const now = Date.now();
-    qSessionAdd.run(sha256(token), now, now, String(req.headers['user-agent'] || '').slice(0, 200));
-    return send(res, 200, { token, version: VERSION });
+    qSessionAdd.run(sha256(token), now, now, String(req.headers['user-agent'] || '').slice(0, 200), user.id);
+    return send(res, 200, { token, version: VERSION, user: publicUser(user) });
   }
 
   const session = auth(req, body);
   if (!session) return send(res, 401, { error: 'Non authentifié' });
+  const me = session.user;
 
   if (pathname === '/api/logout' && req.method === 'POST') {
-    qSessionDel.run(session);
+    qSessionDel.run(session.th);
+    return send(res, 200, { ok: true });
+  }
+
+  if (pathname === '/api/me') return send(res, 200, { user: publicUser(me), version: VERSION });
+
+  if (pathname === '/api/people') {
+    return send(res, 200, { people: db.prepare('SELECT id, name FROM users ORDER BY name COLLATE NOCASE').all() });
+  }
+
+  if (pathname === '/api/me/password' && req.method === 'POST') {
+    if (!verifyPassword(String(body.current || ''), me.pw)) return send(res, 403, { error: 'Mot de passe actuel incorrect.' });
+    if (!validPw(body.password)) return send(res, 400, { error: 'Nouveau mot de passe trop court (4 caractères min.).' });
+    db.prepare('UPDATE users SET pw = ? WHERE id = ?').run(hashPassword(body.password), me.id);
+    db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?').run(me.id, session.th);
     return send(res, 200, { ok: true });
   }
 
   if (pathname === '/api/stats') {
-    const out = { version: VERSION, rev: Number(getKV('rev') || 0), repo: process.env.CARNET_REPO || '' };
-    for (const r of qStats.all()) out[r.type] = r.n;
+    const out = { version: VERSION, rev: Number(getKV('rev') || 0), repo: process.env.CARNET_REPO || '', user: publicUser(me) };
+    for (const r of qStats.all(me.id, me.id)) out[r.type] = r.n;
     return send(res, 200, out);
+  }
+
+  /* Gestion des comptes (administrateurs) : { action: list | add | passwd | rename | admin | delete } */
+  if (pathname === '/api/users' && req.method === 'POST') {
+    if (!me.admin) return send(res, 403, { error: 'Réservé aux administrateurs.' });
+    const a = body.action;
+    if (a === 'list') return send(res, 200, { users: qUsers.all().map((u) => ({ ...publicUser(u), notes: u.notes, created_at: u.created_at })) });
+    const target = body.id != null ? qUserById.get(Number(body.id)) : null;
+    if (a === 'add') {
+      const name = String(body.name || '').trim();
+      if (!validName(name)) return send(res, 400, { error: 'Nom invalide (lettres, chiffres, espace, . _ - ; 32 caractères max).' });
+      if (qUserByName.get(name)) return send(res, 409, { error: 'Ce nom existe déjà.' });
+      if (!validPw(body.password)) return send(res, 400, { error: 'Mot de passe trop court (4 caractères min.).' });
+      db.prepare('INSERT INTO users(name, pw, admin, created_at) VALUES(?, ?, ?, ?)').run(name, hashPassword(body.password), body.admin ? 1 : 0, Date.now());
+      return send(res, 200, { ok: true });
+    }
+    if (!target) return send(res, 404, { error: 'Utilisateur introuvable.' });
+    if (a === 'passwd') {
+      if (!validPw(body.password)) return send(res, 400, { error: 'Mot de passe trop court (4 caractères min.).' });
+      db.prepare('UPDATE users SET pw = ? WHERE id = ?').run(hashPassword(body.password), target.id);
+      if (target.id !== me.id) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(target.id);
+      return send(res, 200, { ok: true });
+    }
+    if (a === 'rename') {
+      const name = String(body.name || '').trim();
+      if (!validName(name)) return send(res, 400, { error: 'Nom invalide.' });
+      const other = qUserByName.get(name);
+      if (other && other.id !== target.id) return send(res, 409, { error: 'Ce nom existe déjà.' });
+      db.prepare('UPDATE users SET name = ? WHERE id = ?').run(name, target.id);
+      return send(res, 200, { ok: true });
+    }
+    if (a === 'admin') {
+      if (!body.admin && target.admin && qAdminCount.get().n <= 1) return send(res, 400, { error: 'Il faut garder au moins un administrateur.' });
+      db.prepare('UPDATE users SET admin = ? WHERE id = ?').run(body.admin ? 1 : 0, target.id);
+      return send(res, 200, { ok: true });
+    }
+    if (a === 'delete') {
+      if (target.id === me.id) return send(res, 400, { error: 'Vous ne pouvez pas supprimer votre propre compte.' });
+      let rev = Number(getKV('rev') || 0);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        // notes partagées : transférées à l'administrateur qui supprime ; le reste est effacé
+        for (const it of db.prepare('SELECT * FROM items WHERE owner = ?').all(target.id)) {
+          rev += 1;
+          const sharedSome = it.type === 'note' && !it.deleted && (it.shared || qSharesOf.all(it.id).length);
+          if (!sharedSome) qShareDelItem.run(it.id);
+          if (sharedSome) {
+            db.prepare('UPDATE items SET owner = ?, rev = ?, updated_at = updated_at + 1 WHERE id = ?').run(me.id, rev, it.id);
+          } else {
+            db.prepare('UPDATE items SET deleted = 1, data = NULL, rev = ?, updated_at = updated_at + 1 WHERE id = ?').run(rev, it.id);
+          }
+        }
+        db.prepare('DELETE FROM item_meta WHERE user_id = ?').run(target.id);
+        db.prepare('DELETE FROM item_shares WHERE user_id = ?').run(target.id);
+        db.prepare('DELETE FROM sessions WHERE user_id = ?').run(target.id);
+        db.prepare('DELETE FROM users WHERE id = ?').run(target.id);
+        setKV('rev', rev);
+        db.exec('COMMIT');
+      } catch (e) { db.exec('ROLLBACK'); throw e; }
+      return send(res, 200, { ok: true });
+    }
+    return send(res, 400, { error: 'Action inconnue.' });
   }
 
   /*
    * Synchronisation : le client envoie ses modifications locales et la dernière
-   * révision serveur qu'il connaît ; le serveur applique "le plus récent gagne"
-   * (updated_at) puis renvoie tout ce qui a changé depuis.
+   * révision serveur qu'il connaît ; le serveur applique « le plus récent gagne »
+   * (listes de courses : fusion article par article) puis renvoie ce que
+   * l'utilisateur peut voir et qui a changé depuis.
    */
   if (pathname === '/api/sync' && req.method === 'POST') {
     const since = Number(body.since) || 0;
@@ -228,28 +522,17 @@ async function handleApi(req, res, pathname) {
     let applied = 0;
     db.exec('BEGIN IMMEDIATE');
     try {
-      for (const c of changes) {
-        if (!c || typeof c.id !== 'string' || c.id.length > 64 || !['note', 'folder'].includes(c.type)) continue;
-        const ts = Number(c.updated_at);
-        if (!Number.isFinite(ts)) continue;
-        const cur = qItemGet.get(c.id);
-        if (cur && cur.updated_at >= ts) continue; // version serveur plus récente ou identique
-        rev += 1;
-        const deleted = c.deleted ? 1 : 0;
-        qItemUpsert.run(c.id, c.type, deleted ? null : JSON.stringify(c.data ?? {}), ts, deleted, rev);
-        applied += 1;
-      }
+      for (const c of changes) if (applyChange(me, c, () => ++rev)) applied += 1;
       setKV('rev', rev);
       db.exec('COMMIT');
     } catch (e) {
       db.exec('ROLLBACK');
       throw e;
     }
-    const out = qChangesSince.all(since).map((r) => ({
-      id: r.id, type: r.type, updated_at: r.updated_at, deleted: !!r.deleted,
-      data: r.data ? JSON.parse(r.data) : null,
-    }));
-    return send(res, 200, { rev, applied, changes: out, version: VERSION });
+    const names = userNames();
+    const out = [];
+    for (const r of qChangesSince.all(since)) { const v = viewFor(me, r, names); if (v) out.push(v); }
+    return send(res, 200, { rev, applied, changes: out, version: VERSION, user: publicUser(me) });
   }
 
   return send(res, 404, { error: 'Introuvable' });
@@ -290,7 +573,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`ALBANOTES ${VERSION} — http://${HOST}:${PORT} — données : ${DATA_DIR}`);
-  if (!getKV('password')) console.warn('ATTENTION : aucun mot de passe défini (carnet passwd).');
+  if (qUserCount.get().n === 0) console.warn('ATTENTION : aucun compte (carnet passwd).');
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

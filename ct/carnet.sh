@@ -74,7 +74,7 @@ fi
 pct status "$CTID" >/dev/null 2>&1 && die "L'ID $CTID est déjà utilisé."
 
 while :; do
-  PW1=$(WT --passwordbox "Mot de passe de connexion à ALBANOTES (4 caractères min.)" 9 58) || exit 1
+  PW1=$(WT --passwordbox "Mot de passe du compte administrateur « admin » d'ALBANOTES (4 caractères min.)" 9 70) || exit 1
   PW2=$(WT --passwordbox "Confirmez le mot de passe" 9 58) || exit 1
   [[ "$PW1" == "$PW2" && ${#PW1} -ge 4 ]] && break
   WT --msgbox "Les mots de passe ne correspondent pas ou sont trop courts." 8 58
@@ -125,7 +125,8 @@ pct exec "$CTID" -- env LC_ALL=C.UTF-8 LANG=C.UTF-8 CARNET_REPO="$REPO" CARNET_B
 IP=$(pct exec "$CTID" -- hostname -I | awk '{print $1}')
 echo
 ok "${APP} est installé !"
-echo -e "   Accès local       : ${YW}http://${IP}:${PORT}${CL}"
+echo -e "   Accès local       : ${YW}http://${IP}:${PORT}${CL}  (identifiant : ${YW}admin${CL})"
 echo -e "   Mise à jour       : ${YW}update${CL} dans la console du CT, ou ${YW}pct exec ${CTID} -- update${CL}"
-echo -e "   Outils            : ${YW}carnet passwd | backup | logs | status | version${CL}"
+echo -e "   Outils            : ${YW}carnet passwd | users | backup | logs | status | version${CL}"
+echo -e "   Comptes           : Paramètres → Utilisateurs dans l'appli (renommer « admin », ajouter des personnes)"
 echo -e "   Windows / Android : publiez-le en HTTPS (ex. Nginx Proxy Manager) puis « Installer l'application »."

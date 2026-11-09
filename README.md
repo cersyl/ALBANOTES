@@ -4,6 +4,7 @@ ALBANOTES : prise de notes rapide façon Samsung Notes, auto-hébergée, synchro
 
 - **Notes riches** : titre, gras/italique/souligné/barré, titres, couleurs et surlignage, listes à puces/numérotées, **listes de tâches cochables**, séparateurs, alignement
 - **Dessin à main levée** (stylet avec pression, surligneur, gomme, rejet de la paume) et **images** (collage, glisser-déposer, galerie/appareil photo)
+- **Plusieurs utilisateurs** : chacun a ses notes et ses dossiers ; une note peut être partagée avec tout le monde ou avec des personnes choisies (modifiable par elles), les listes de courses sont communes à tous et fusionnées article par article ; comptes gérés dans *Paramètres → Utilisateurs* (administrateurs)
 - **Listes de courses** : catalogue d'environ 130 produits classés par rayon, ajout rapide avec quantité (« 2 baguettes »), suggestions pendant la saisie, produits personnels mémorisés, articles cochés regroupés « dans le panier »
 - **Couleurs de note**, épinglage, favoris, **dossiers** colorés avec émoticônes (Maison, Bureau, Loisirs, Vie perso, Divers…), recherche, tri, grille/liste, sélection multiple (appui long)
 - **Page libre (style OneNote)** : bouton ▦ de la barre d'outils — touchez n'importe où pour créer un bloc de texte, déplacez-le librement par sa barre, élargissez-le par sa poignée ; la page s'adapte automatiquement à la largeur du téléphone
@@ -59,11 +60,19 @@ Au premier lancement : adresse du serveur (ex. `https://notes.mondomaine`, ou `h
 
 La clé de signature Android (`android/app/albanotes.keystore`, mot de passe `albanotes`) est dans le dépôt pour que chaque compilation puisse mettre à jour l'appli installée. Pour une clé privée, définir les secrets GitHub `ALBA_KEYSTORE_PASS` et adapter `android/app/build.gradle` (une nouvelle clé impose de désinstaller l'ancienne appli une fois).
 
+## Utilisateurs
+
+Le premier compte est l'administrateur **`admin`** (mot de passe choisi à l'installation ; lors de la mise à jour d'une version mono-utilisateur, l'ancien mot de passe devient celui d'`admin` et les appareils restent connectés). Dans l'appli, *Paramètres → Utilisateurs* permet de le renommer, d'ajouter des personnes, de changer leurs mots de passe, de leur donner les droits d'administrateur ou de supprimer un compte (ses notes partagées sont alors transférées, ses notes privées effacées). Chacun peut changer son propre mot de passe dans *Paramètres*.
+
+- **Notes** : privées par défaut. Menu ⋮ → *Partager avec…* : « Tout le monde » (comptes futurs compris) ou des personnes choisies. Elles voient et modifient la note ; dossier, favori, épingle et ordre restent propres à chacun. Rubrique *👥 Notes partagées* dans le menu.
+- **Listes de courses** : communes à tous. Deux personnes peuvent les modifier en même temps (même hors connexion) : les changements sont fusionnés article par article.
+
 ## Administration (dans le CT)
 
 | Commande | Effet |
 |---|---|
-| `carnet passwd` | change le mot de passe (déconnecte tous les appareils) |
+| `carnet passwd [nom]` | change le mot de passe d'un compte (sans nom : l'administrateur), utile en cas d'oubli |
+| `carnet users` | liste les comptes (★ = administrateur) |
 | `carnet revoke` | déconnecte tous les appareils |
 | `carnet backup` | sauvegarde immédiate (`/var/lib/carnet/backups`, 10 conservées) |
 | `carnet logs` / `status` / `restart` / `version` | exploitation |

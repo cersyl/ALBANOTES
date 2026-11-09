@@ -72,31 +72,8 @@ NoNewPrivileges=true
 WantedBy=multi-user.target
 EOF
 
-# Outil d'administration
-cat >/usr/local/bin/carnet <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-set -a; . /etc/carnet/carnet.conf; set +a
-cd /
-case "${1:-help}" in
-  passwd)
-    read -rsp "Nouveau mot de passe : " a; echo; read -rsp "Confirmation : " b; echo
-    [[ "$a" == "$b" ]] || { echo "Les mots de passe diffèrent."; exit 1; }
-    printf '%s\n' "$a" | runuser -u carnet -- env DATA_DIR="$DATA_DIR" node --no-warnings /opt/carnet/server/server.js passwd ;;
-  revoke)  runuser -u carnet -- env DATA_DIR="$DATA_DIR" node --no-warnings /opt/carnet/server/server.js revoke ;;
-  backup)
-    f="$DATA_DIR/backups/carnet-$(date +%Y%m%d-%H%M%S).db"
-    sqlite3 "$DATA_DIR/carnet.db" ".backup '$f'" && chown carnet:carnet "$f" && echo "Sauvegarde : $f"
-    ls -1t "$DATA_DIR"/backups/carnet-*.db 2>/dev/null | tail -n +11 | xargs -r rm -f ;;
-  update)  exec /usr/bin/update ;;
-  logs)    journalctl -u carnet -n 100 -f ;;
-  status)  systemctl --no-pager status carnet ;;
-  restart) systemctl restart carnet && echo "Redémarré." ;;
-  version) cat /opt/carnet/VERSION ;;
-  *) echo "Usage : carnet {passwd|revoke|backup|update|logs|status|restart|version}" ;;
-esac
-EOF
-chmod +x /usr/local/bin/carnet
+# Outil d'administration (fourni par le dépôt, remis à jour à chaque « update »)
+install -m 755 "$APP_DIR/install/carnet-cli.sh" /usr/local/bin/carnet
 
 # Commande « update », comme les Proxmox VE Helper-Scripts
 cat >/usr/bin/update <<'EOF'

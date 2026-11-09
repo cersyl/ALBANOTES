@@ -344,3 +344,19 @@ a.sheet-item { color: inherit; text-decoration: none; }
 .shop-add-btn i { width: 24px; height: 24px; }
 .shop-newprod { display: flex; gap: 6px; padding: 0 8px 4px; }
 .shop-newprod input { flex: 1; min-width: 0; margin: 0 !important; }
+
+/* ---------- Comptes ---------- */
+.me-row { display: flex; align-items: center; gap: 12px; padding: 4px 12px 10px; color: var(--text-2); }
+.me-row b { color: var(--text); }
+.user-row span { display: flex; flex-direction: column; flex: 1; }
+.user-row small { color: var(--text-2); font-size: 12px; }
+.user-add { padding: 0 6px; }
+.chk { display: flex; align-items: center; gap: 10px; padding: 4px 6px 8px; font-size: 14px; }
+.chk input { width: 18px; height: 18px; accent-color: var(--accent); margin: 0 !important; }
+.c-share { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.share-all { font-size: 15px; padding: 6px 12px 10px; }
+.share-all small { color: var(--text-2); font-weight: 400; }
+.share-people { display: flex; flex-direction: column; padding: 0 6px 6px; max-height: 40vh; overflow: auto; }
+.share-people .chk { padding: 8px 6px; font-size: 15px; border-radius: 10px; }
+.share-people .chk:hover { background: var(--surface-2); }
+.share-people .chk.off { opacity: .4; }

@@ -53,6 +53,9 @@ const ICONS = {
   share: 'M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z',
   sync: 'M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z',
   install: 'M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z',
+  people: 'M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z',
+  person: 'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
+  key: 'M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z',
 };
 const svg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[name] || ''}"/></svg>`;
 const ic = (name) => `<i data-i="${name}">${svg(name)}</i>`;
@@ -134,6 +137,8 @@ const S = {
   layout: pref.get('layout', 'grid'),
   theme: pref.get('theme', 'auto'),
   token: pref.get('token', null),
+  me: pref.get('me', null), // { id, name, admin }
+  people: pref.get('people', {}), // id -> nom (pour afficher avec qui une note est partagée)
   selecting: false,
   selected: new Set(),
   editing: null, edNew: false, edSaved: false, edPending: false,
@@ -144,6 +149,20 @@ const notes = () => [...S.items.values()].filter((i) => i.type === 'note' && !i.
 const folders = () => [...S.items.values()].filter((i) => i.type === 'folder' && !i.deleted)
   .sort((a, b) => (a.data.order ?? 1e15) - (b.data.order ?? 1e15) || a.data.name.localeCompare(b.data.name, 'fr', { sensitivity: 'base' }));
 const editedAt = (n) => n.data.edited_at || n.updated_at;
+/** Note partagée (par moi avec quelqu'un, ou par quelqu'un avec moi) — hors listes de courses, toujours communes. */
+const isSharedNote = (n) => n.type === 'note' && n.data?.kind !== 'shop' && (n.mine === false || !!n.shared || (n.shareWith || []).length > 0);
+const personName = (id) => S.people[id] || '?';
+function shareLabel(n) {
+  if (n.mine === false) return `partagée par ${n.owner}`;
+  if (n.shared) return 'partagée avec tout le monde';
+  const ids = n.shareWith || [];
+  return ids.length ? `partagée avec ${ids.map(personName).join(', ')}` : '';
+}
+async function loadPeople() {
+  const r = await api('/api/people');
+  S.people = Object.fromEntries(r.people.map((p) => [p.id, p.name])); pref.set('people', S.people);
+  return r.people;
+}
 const DRAG = { active: false, renderPending: false };
 let lastPointer = 'mouse';
 document.addEventListener('pointerdown', (e) => { lastPointer = e.pointerType; }, true);
@@ -210,23 +229,43 @@ async function sync() {
     const since = (await DB.getMeta('rev')) || 0;
     const r = await api('/api/sync', {
       since,
-      changes: dirty.map(({ id, type, data, updated_at, deleted }) => ({ id, type, data, updated_at, deleted: !!deleted })),
+      changes: dirty.map(({ id, type, data, updated_at, deleted, shared, shareWith }) => ({ id, type, data, updated_at, deleted: !!deleted,
+        ...(typeof shared === 'boolean' ? { shared } : {}), ...(Array.isArray(shareWith) ? { shareWith } : {}) })),
     });
+    if (r.user) { S.me = r.user; pref.set('me', r.user); }
     const toSave = [];
     for (const d of dirty) {
       const cur = S.items.get(d.id);
       if (cur === d) { cur.dirty = false; toSave.push(cur); } // pas modifié pendant l'envoi
     }
     let changed = false, editorHit = false;
+    const gone = [];
     for (const s of r.changes) {
       const cur = S.items.get(s.id);
-      if (cur && cur.updated_at > s.updated_at) continue; // version locale plus récente
-      if (cur && !cur.dirty && cur.updated_at === s.updated_at) continue; // déjà à jour
-      const it = { id: s.id, type: s.type, data: s.data, updated_at: s.updated_at, deleted: s.deleted, dirty: false };
+      if (s.gone) { // note qui n'est plus partagée avec moi : l'oublier
+        if (cur) { S.items.delete(s.id); gone.push(s.id); changed = true; if (s.id === S.editing) editorHit = true; }
+        continue;
+      }
+      if (s.deleted && !cur) continue;
+      const own = { shared: !!s.shared, shareWith: Array.isArray(s.shareWith) ? s.shareWith : [], mine: s.mine !== false, owner: s.owner || '' };
+      const ownChanged = cur && (cur.shared !== own.shared || cur.mine !== own.mine || cur.owner !== own.owner || JSON.stringify(cur.shareWith || []) !== JSON.stringify(own.shareWith));
+      if (cur && (cur.updated_at > s.updated_at || (!cur.dirty && cur.updated_at === s.updated_at))) {
+        // version locale plus récente ou identique : seules les infos de partage sont mises à jour
+        if (ownChanged) { Object.assign(cur, own); toSave.push(cur); changed = true; }
+        continue;
+      }
+      let data = s.data, updated = s.updated_at, dirtyAfter = false;
+      if (cur?.dirty && isShopData(cur.data) && isShopData(data)) { // liste modifiée des deux côtés : fusion
+        data = mergeShop(cur.data, cur.updated_at, data, s.updated_at); updated = Math.max(cur.updated_at, s.updated_at) + 1; dirtyAfter = true;
+      }
+      if (isShopData(data)) Object.assign(data, shopDerive(data.items || []));
+      const it = { id: s.id, type: s.type, data, updated_at: updated, deleted: s.deleted, dirty: dirtyAfter, ...own };
       S.items.set(it.id, it); toSave.push(it); changed = true;
       if (it.id === S.editing) editorHit = true;
     }
     if (toSave.length) await DB.put(...toSave);
+    for (const id of gone) await DB.del(id);
+    if (toSave.some((x) => x.dirty)) scheduleSync();
     await DB.setMeta('rev', r.rev);
     if (changed) { render(); if (editorHit) refreshEditorFromRemote(); }
     setSync('');
@@ -244,7 +283,8 @@ function showLogin() {
   $('#login').hidden = false;
   const srv = $('#loginServer');
   if (NATIVE && srv) { srv.hidden = false; srv.required = true; srv.value = SERVER; }
-  setTimeout(() => (NATIVE && !SERVER ? srv : $('#loginPw')).focus(), 50);
+  $('#loginUser').value = pref.get('lastUser', '');
+  setTimeout(() => (NATIVE && !SERVER ? srv : $('#loginUser').value ? $('#loginPw') : $('#loginUser')).focus(), 50);
 }
 $('#loginForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -252,13 +292,19 @@ $('#loginForm').addEventListener('submit', async (e) => {
   const prevServer = SERVER;
   if (NATIVE) SERVER = normServer($('#loginServer').value);
   try {
-    const r = await api('/api/login', { password: $('#loginPw').value });
+    const r = await api('/api/login', { username: $('#loginUser').value.trim(), password: $('#loginPw').value });
     if (NATIVE) { NATIVE.setServer(SERVER); setTimeout(checkShellUpdate, 3000); }
+    // autre utilisateur que celui dont les notes sont sur cet appareil : repartir de zéro
+    const prevMe = S.me;
+    if (r.user && prevMe && prevMe.id !== r.user.id) { S.items.clear(); await DB.clear(); S.view = 'all'; pref.set('view', 'all'); }
     S.token = r.token; pref.set('token', r.token);
+    if (r.user) { S.me = r.user; pref.set('me', r.user); pref.set('lastUser', r.user.name); }
+    loadPeople().catch(() => {});
     $('#loginPw').value = ''; $('#login').hidden = true;
     // forcer une resynchronisation complète
-    await DB.setMeta('rev', 0);
+    await DB.setMeta('rev', 0); await DB.setMeta('schema', 2);
     S.items.forEach((i) => { i.dirty = true; });
+    render();
     await sync();
   } catch (err) {
     if (NATIVE && err.offline) SERVER = prevServer || SERVER;
@@ -274,6 +320,7 @@ function viewName(v = S.view) {
   if (v === 'fav') return 'Favoris';
   if (v === 'trash') return 'Corbeille';
   if (v === 'shop') return '🛒 Listes de courses';
+  if (v === 'shared') return '👥 Notes partagées';
   { const f = folderById(v); return f ? `${folderEmoji(f)} ${f.data.name}` : 'Dossier'; }
 }
 function visibleNotes() {
@@ -283,6 +330,7 @@ function visibleNotes() {
     list = list.filter((n) => !n.data.trashed);
     if (S.view === 'fav') list = list.filter((n) => n.data.fav);
     else if (S.view === 'shop') list = list.filter((n) => n.data.kind === 'shop');
+    else if (S.view === 'shared') list = list.filter(isSharedNote);
     else if (S.view !== 'all') list = list.filter((n) => n.data.folder === S.view);
   }
   if (S.search) {
@@ -318,6 +366,7 @@ function cardHtml(n) {
       <span>${fmtDate(S.sort === 'created' ? d.created_at || n.updated_at : editedAt(n))}</span>
       ${d.kind === 'shop' ? `<span>· 🛒 ${total - checked} à acheter</span>` : total ? `<span>· ☑ ${checked}/${total}</span>` : ''}
       ${folder ? `<span>· ${esc(folderEmoji(folder))} ${esc(folder.data.name)}</span>` : ''}
+      ${isSharedNote(n) ? `<span class="c-share" title="${esc(shareLabel(n))}">· 👥 ${esc(n.mine === false ? n.owner : n.shared ? 'tous' : (n.shareWith || []).map(personName).join(', '))}</span>` : ''}
     </div>
     ${d.pinned ? `<i class="c-badge" data-i="pin">${svg('pin')}</i>` : d.fav ? `<i class="c-badge" data-i="star">${svg('star')}</i>` : ''}
     <span class="c-check"></span>
@@ -380,6 +429,7 @@ function renderDrawer() {
     item('all', 'notes', 'Toutes les notes', all.length) +
     item('fav', 'star', 'Favoris', count((n) => n.data.fav)) +
     item('shop', 'cart', 'Listes de courses', count((n) => n.data.kind === 'shop')) +
+    item('shared', 'people', 'Notes partagées', count(isSharedNote)) +
     `<div class="drawer-sep"></div><div class="drawer-label">Dossiers</div>` +
     folders().map((f) => item(f.id, 'folder', f.data.name, count((n) => n.data.folder === f.id), f)).join('') +
     `<div class="drawer-sep"></div>` +
@@ -841,9 +891,13 @@ async function settingsMenu() {
   try { const s = await api('/api/stats'); repo = s.repo || ''; info = `Serveur v${s.version} · ${s.note || 0} notes · ${s.folder || 0} dossiers`; }
   catch { info = 'Serveur injoignable — les notes restent enregistrées sur cet appareil et seront envoyées au retour du serveur.'; }
   if (NATIVE) info = `Appli ${NATIVE.platform?.() || ''} v${NATIVE.shellVersion?.() || '?'} · ${SERVER}\n` + info;
+  const me = S.me;
   const pending = [...S.items.values()].filter((i) => i.dirty).length;
   const seg = (v, l) => `<button class="${S.theme === v ? 'on' : ''}" data-t="${v}">${l}</button>`;
   openSheet(`<h3>Paramètres</h3>
+    ${me ? `<div class="me-row">${ic('person')}<span><b>${esc(me.name)}</b>${me.admin ? ' · administrateur' : ''}</span></div>` : ''}
+    ${me ? `<button class="sheet-item" data-a="mypw">${ic('key')}<span>Changer mon mot de passe</span></button>` : ''}
+    ${me?.admin ? `<button class="sheet-item" data-a="users">${ic('people')}<span>Utilisateurs</span></button>` : ''}
     <div class="drawer-label">Thème</div>
     <div class="seg">${seg('auto', 'Auto')}${seg('light', 'Clair')}${seg('dark', 'Sombre')}</div>
     ${S.installPrompt ? `<button class="sheet-item" data-a="install">${ic('install')}<span>Installer l’application</span></button>` : ''}
@@ -862,15 +916,122 @@ async function settingsMenu() {
     if (a === 'sync') { await sync(); toast($('#syncDot').classList.contains('err') || $('#syncDot').classList.contains('off') ? 'Synchronisation impossible' : 'Synchronisé'); }
     if (a === 'export') exportAll();
     if (a === 'import') importFiles();
+    if (a === 'mypw') myPasswordSheet();
+    if (a === 'users') usersSheet();
     if (a === 'logout') {
       const pend = [...S.items.values()].filter((i) => i.dirty).length;
       if (!(await confirmBox('Se déconnecter ?', pend ? `${pend} modification(s) non synchronisée(s) seront perdues.` : 'Les notes locales de cet appareil seront effacées (elles restent sur le serveur).', 'Déconnexion'))) return;
       try { await api('/api/logout', {}); } catch {}
-      S.token = null; pref.set('token', null);
+      S.token = null; pref.set('token', null); S.me = null; pref.set('me', null);
       S.items.clear(); await DB.clear(); render(); showLogin();
     }
   });
 }
+/* ================= Partage d'une note ================= */
+async function shareSheet(id) {
+  const cur = S.items.get(id); if (!cur) return;
+  let people;
+  try { people = (await loadPeople()).filter((p) => p.id !== S.me?.id); }
+  catch (err) { toast(err.offline ? 'Serveur injoignable : le partage nécessite une connexion.' : err.message); return; }
+  const sel = new Set(cur.shareWith || []);
+  let all = !!cur.shared;
+  const card = openSheet(`<h3>Partager « ${esc(cur.data.title || 'Sans titre')} »</h3>
+    <label class="chk share-all"><input type="checkbox" name="all"${all ? ' checked' : ''}> 👥 <b>Tout le monde</b>&nbsp;<small>(y compris les futurs comptes)</small></label>
+    <div class="drawer-label">Ou seulement avec :</div>
+    <div class="share-people">${people.length ? people.map((p) => `<label class="chk"><input type="checkbox" data-pid="${p.id}"${sel.has(p.id) ? ' checked' : ''}> ${esc(p.name)}</label>`).join('')
+      : '<p class="muted">Aucun autre compte pour l’instant. Un administrateur peut en créer dans Paramètres → Utilisateurs.</p>'}</div>
+    <p class="muted">Les personnes choisies voient la note et peuvent la modifier. Dossier, favori et épingle restent propres à chacun.</p>
+    <div class="sheet-actions"><button class="btn-text" data-x>Annuler</button><button class="btn-text" data-ok>Enregistrer</button></div>`, async (e) => {
+    if (e.target.closest('[data-x]')) return closeSheet();
+    if (!e.target.closest('[data-ok]')) return;
+    const ids = all ? [] : [...card.querySelectorAll('[data-pid]')].filter((x) => x.checked).map((x) => +x.dataset.pid);
+    const was = isSharedNote(cur);
+    closeSheet();
+    const it = S.items.get(id);
+    await saveItem({ ...it, shared: all, shareWith: ids });
+    S.edSaved = true; updateEditorMeta(); render();
+    const n = S.items.get(id);
+    toast(isSharedNote(n) ? `Note ${shareLabel(n)}` : was ? 'Note redevenue privée' : 'Note privée');
+  });
+  const paint = () => card.querySelectorAll('[data-pid]').forEach((x) => { x.disabled = all; x.closest('label').classList.toggle('off', all); });
+  card.querySelector('[name=all]').addEventListener('change', (e) => { all = e.target.checked; paint(); });
+  paint();
+}
+
+/* ================= Comptes ================= */
+function myPasswordSheet() {
+  const card = openSheet(`<h3>Changer mon mot de passe</h3><form>
+      <input type="password" name="cur" placeholder="Mot de passe actuel" autocomplete="current-password" required>
+      <input type="password" name="pw" placeholder="Nouveau mot de passe (4 caractères min.)" autocomplete="new-password" required>
+      <input type="password" name="pw2" placeholder="Confirmer le nouveau mot de passe" autocomplete="new-password" required>
+      <p class="err" id="pwErr"></p>
+      <div class="sheet-actions"><button type="button" class="btn-text" data-x>Annuler</button><button class="btn-text">Enregistrer</button></div>
+    </form>`, (e) => { if (e.target.closest('[data-x]')) closeSheet(); });
+  setTimeout(() => card.querySelector('[name=cur]').focus(), 60);
+  card.querySelector('form').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    if (f.pw.value !== f.pw2.value) { $('#pwErr').textContent = 'Les deux mots de passe diffèrent.'; return; }
+    try { await api('/api/me/password', { current: f.cur.value, password: f.pw.value }); closeSheet(); toast('Mot de passe changé. Vos autres appareils devront se reconnecter.'); }
+    catch (err) { $('#pwErr').textContent = err.offline ? 'Serveur injoignable.' : err.message; }
+  };
+}
+async function usersSheet() {
+  let users;
+  try { users = (await api('/api/users', { action: 'list' })).users; }
+  catch (err) { toast(err.offline ? 'Serveur injoignable : la gestion des comptes nécessite une connexion.' : err.message); return; }
+  const card = openSheet(`<h3>Utilisateurs</h3>
+    <div class="users-list">${users.map((u) => `<button class="sheet-item user-row" data-uid="${u.id}">
+        ${ic(u.admin ? 'key' : 'person')}<span>${esc(u.name)}${u.id === S.me?.id ? ' (vous)' : ''}<small>${u.admin ? 'Administrateur · ' : ''}${u.notes} note${u.notes > 1 ? 's' : ''}</small></span>${ic('more')}</button>`).join('')}</div>
+    <div class="drawer-label">Ajouter un utilisateur</div>
+    <form class="user-add" autocomplete="off">
+      <input type="text" name="name" placeholder="Nom (ex. Alice)" maxlength="32" required autocapitalize="words">
+      <input type="text" name="pw" placeholder="Mot de passe (4 caractères min.)" required autocomplete="off">
+      <label class="chk"><input type="checkbox" name="admin"> Administrateur (peut gérer les comptes)</label>
+      <p class="err" id="uErr"></p>
+      <div class="sheet-actions"><button type="button" class="btn-text" data-x>Fermer</button><button class="btn-text">Ajouter</button></div>
+    </form>
+    <p class="muted">Chacun voit ses notes et les notes partagées. Les listes de courses sont communes à tous.</p>`, (e) => {
+    if (e.target.closest('[data-x]')) return closeSheet();
+    const row = e.target.closest('[data-uid]');
+    if (row) { closeSheet(); userMenu(users.find((u) => u.id === +row.dataset.uid)); }
+  });
+  card.querySelector('.user-add').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      await api('/api/users', { action: 'add', name: f.name.value.trim(), password: f.pw.value, admin: f.admin.checked });
+      toast(`Compte « ${f.name.value.trim()} » créé`); closeSheet(); usersSheet();
+    } catch (err) { $('#uErr').textContent = err.offline ? 'Serveur injoignable.' : err.message; }
+  };
+}
+function userMenu(u) {
+  if (!u) return;
+  const self = u.id === S.me?.id;
+  openSheet(`<h3>${esc(u.name)}</h3>
+    <button class="sheet-item" data-a="rename">${ic('edit')}<span>Renommer</span></button>
+    <button class="sheet-item" data-a="pw">${ic('key')}<span>Définir un nouveau mot de passe</span></button>
+    ${self ? '' : `<button class="sheet-item" data-a="admin">${ic('person')}<span>${u.admin ? 'Retirer les droits d’administrateur' : 'Rendre administrateur'}</span></button>`}
+    ${self ? '' : `<button class="sheet-item danger" data-a="del">${ic('trash')}<span>Supprimer ce compte</span></button>`}
+    <div class="sheet-actions"><button class="btn-text" data-a="back">Retour</button></div>`, async (e) => {
+    const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
+    closeSheet();
+    const run = async (body, ok) => {
+      try { await api('/api/users', body); toast(ok); if (self && body.action === 'rename') { S.me = { ...S.me, name: body.name }; pref.set('me', S.me); } }
+      catch (err) { toast(err.offline ? 'Serveur injoignable.' : err.message); }
+    };
+    if (a === 'rename') { const n = await promptBox('Nouveau nom', u.name, 'Renommer'); if (n) await run({ action: 'rename', id: u.id, name: n }, 'Compte renommé'); }
+    if (a === 'pw') { const pw = await promptBox(`Nouveau mot de passe pour ${u.name}`, '', 'Enregistrer'); if (pw) await run({ action: 'passwd', id: u.id, password: pw }, self ? 'Mot de passe changé' : `Mot de passe changé, ${u.name} devra se reconnecter`); }
+    if (a === 'admin') await run({ action: 'admin', id: u.id, admin: !u.admin }, u.admin ? 'Droits retirés' : `${u.name} est administrateur`);
+    if (a === 'del') {
+      if (!(await confirmBox(`Supprimer le compte « ${u.name} » ?`, 'Ses notes privées et ses dossiers seront effacés. Ses notes partagées vous seront transférées.', 'Supprimer'))) { usersSheet(); return; }
+      await run({ action: 'delete', id: u.id }, `Compte « ${u.name} » supprimé`);
+      sync();
+    }
+    usersSheet();
+  });
+}
+
 function exportAll() {
   const out = { app: 'carnet', exported_at: new Date().toISOString(),
     folders: folders().map((f) => ({ id: f.id, ...f.data })),
@@ -910,8 +1071,8 @@ const ed = { root: $('#editor'), title: $('#edTitle'), body: $('#edBody') };
 const commitDebounced = debounce(() => commitEditor(), 500);
 
 function newNote(prefill = {}) {
-  const folder = !['all', 'fav', 'trash', 'shop'].includes(S.view) ? S.view : null;
-  const it = { id: uid(), type: 'note', deleted: false, updated_at: Date.now(), dirty: false,
+  const folder = !['all', 'fav', 'trash', 'shop', 'shared'].includes(S.view) ? S.view : null;
+  const it = { id: uid(), type: 'note', deleted: false, updated_at: Date.now(), dirty: false, shared: S.view === 'shared', mine: true,
     data: { title: '', html: '', text: '', order: Math.min(0, ...notes().map((n) => n.data.order ?? 0)) - 1000, folder, color: 'default', fav: S.view === 'fav', pinned: false, trashed: false, created_at: Date.now(), ...prefill } };
   S.items.set(it.id, it);
   if (prefill.html || prefill.title) {
@@ -950,7 +1111,8 @@ function updateEditorMeta(it = S.items.get(S.editing)) {
   setIcon($('#edFavIcon'), it.data.fav ? 'star' : 'starO');
   $('[data-action="ed-fav"]').classList.toggle('on', !!it.data.fav);
   { const f = folderById(it.data.folder); $('#edFolder').textContent = f ? `${folderEmoji(f)} ${f.data.name}` : 'Aucun dossier'; }
-  $('#edDate').textContent = S.edSaved ? 'Modifiée ' + fmtFull(editedAt(it)) : '';
+  const share = it.data.kind === 'shop' ? ' · 👥 liste commune' : isSharedNote(it) ? ` · 👥 ${shareLabel(it)}` : '';
+  $('#edDate').textContent = (S.edSaved ? 'Modifiée ' + fmtFull(editedAt(it)) : '') + share;
 }
 function refreshEditorFromRemote() {
   const it = S.items.get(S.editing);
@@ -1178,6 +1340,9 @@ function editorMore() {
   const sw = (c) => `<button class="sw${(d.color || 'default') === c ? ' active' : ''}" data-col="${c}" style="background:${c === 'default' ? 'var(--surface)' : `var(--n-${c})`}" title="${c}"></button>`;
   openSheet(`<h3>Note</h3>
     <div class="drawer-label">Couleur de fond</div><div class="sheet-row">${NOTE_COLORS.map(sw).join('')}</div>
+    ${d.kind === 'shop' ? '' : it.mine === false
+      ? `<p class="muted">👥 Note partagée par ${esc(it.owner)} : vos modifications sont visibles par les personnes qui y ont accès.</p>`
+      : `<button class="sheet-item" data-a="shareto">${ic('people')}<span>${isSharedNote(it) ? `Partage : ${esc(shareLabel(it).replace('partagée ', ''))}` : 'Partager avec…'}</span></button>`}
     <button class="sheet-item" data-a="pin">${ic('pin')}<span>${d.pinned ? 'Désépingler' : 'Épingler en haut'}</span></button>
     <button class="sheet-item" data-a="move">${ic('folder')}<span>Déplacer vers un dossier</span></button>
     <button class="sheet-item" data-a="copy">${ic('copy')}<span>Copier le texte</span></button>
@@ -1196,6 +1361,7 @@ function editorMore() {
     const a = e.target.closest('[data-a]')?.dataset.a; if (!a) return;
     closeSheet();
     const text = [cur.data.title, cur.data.text].filter(Boolean).join('\n\n');
+    if (a === 'shareto') { shareSheet(cur.id); return; }
     if (a === 'pin') { await updateNote(cur.id, { pinned: !cur.data.pinned }); S.edSaved = true; toast(cur.data.pinned ? 'Désépinglée' : 'Épinglée'); }
     if (a === 'move') { const f = await pickFolder(cur.data.folder); if (f !== undefined) { await updateNote(cur.id, { folder: f }); S.edSaved = true; } }
     if (a === 'copy') { await navigator.clipboard?.writeText(text); toast('Texte copié'); }
@@ -1255,10 +1421,34 @@ function shopDerive(items) {
     text: sorted.filter((i) => !i.done).map(label).join('\n') + (sorted.some((i) => i.done) ? `\n✓ ${sorted.filter((i) => i.done).map((i) => i.name).join(', ')}` : ''),
   };
 }
+const isShopData = (d) => !!d && d.kind === 'shop';
+const shopKey = (x) => JSON.stringify({ ...x, t: undefined });
+/** Fusion de deux versions d'une liste de courses, article par article (même règle que le serveur). */
+function mergeShop(a, ta, b, tb) {
+  const newer = tb >= ta ? b : a;
+  const removed = { ...(a.removed || {}) };
+  for (const [k, v] of Object.entries(b.removed || {})) removed[k] = Math.max(removed[k] || 0, Number(v) || 0);
+  const byId = new Map();
+  for (const it of [...(a.items || []), ...(b.items || [])]) {
+    if (!it?.id) continue;
+    const ex = byId.get(it.id);
+    if (!ex || (Number(it.t) || 0) > (Number(ex.t) || 0)) byId.set(it.id, it);
+  }
+  const items = [...byId.values()].filter((it) => !(removed[it.id] && removed[it.id] >= (Number(it.t) || 0)));
+  const seen = new Set(), custom = [];
+  for (const c of [...(newer.custom || []), ...((newer === b ? a : b).custom || [])]) { const k = normName(c?.name); if (k && !seen.has(k)) { seen.add(k); custom.push(c); } }
+  return { ...newer, items, removed, custom };
+}
 async function saveShop(mutate) {
   const it = S.items.get(S.editing); if (!it || it.data.kind !== 'shop') return;
   const data = { ...it.data, items: (it.data.items || []).map((x) => ({ ...x })), custom: [...(it.data.custom || [])] };
+  const before = new Map(data.items.map((x) => [x.id, shopKey(x)]));
   mutate(data);
+  // chaque article modifié reçoit son horodatage : deux personnes peuvent modifier la liste en même temps
+  const now = Date.now(), after = new Set();
+  for (const x of data.items) { after.add(x.id); if (before.get(x.id) !== shopKey(x)) x.t = now; }
+  data.removed = { ...(it.data.removed || {}) };
+  for (const id of before.keys()) if (!after.has(id)) data.removed[id] = now;
   Object.assign(data, shopDerive(data.items), { edited_at: Date.now() });
   const saved = await saveItem({ ...it, data });
   S.edSaved = true;
@@ -1266,7 +1456,7 @@ async function saveShop(mutate) {
 }
 function newShop() {
   const n = notes().filter((x) => x.data.kind === 'shop').length;
-  const it = { id: uid(), type: 'note', deleted: false, updated_at: Date.now(), dirty: false,
+  const it = { id: uid(), type: 'note', deleted: false, updated_at: Date.now(), dirty: false, shared: true, mine: true,
     data: { kind: 'shop', title: n ? `Liste de courses ${n + 1}` : 'Liste de courses', items: [], custom: [], html: '', text: '',
       order: Math.min(0, ...notes().map((x) => x.data.order ?? 0)) - 1000, folder: null, color: 'green', fav: false, pinned: false,
       trashed: false, created_at: Date.now(), edited_at: Date.now() } };
@@ -1935,7 +2125,12 @@ async function init() {
   hydrateIcons();
   applyTheme();
   for (const it of await DB.all()) S.items.set(it.id, it);
-  if (!['all', 'fav', 'trash', 'shop'].includes(S.view) && !folderById(S.view)) S.view = 'all';
+  if ((await DB.getMeta('schema')) !== 2) { await DB.setMeta('rev', 0); await DB.setMeta('schema', 2); } // version multi-utilisateurs
+  if (S.token) {
+    api('/api/me').then((r) => { if (r.user) { S.me = r.user; pref.set('me', r.user); } }).catch(() => {});
+    loadPeople().then(() => render()).catch(() => {});
+  }
+  if (!['all', 'fav', 'trash', 'shop', 'shared'].includes(S.view) && !folderById(S.view)) S.view = 'all';
   await purgeTrash();
   render();
   if (!S.token) { showLogin(); setSync('off'); } else sync();

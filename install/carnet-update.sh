@@ -30,6 +30,7 @@ curl -fsSL "https://codeload.github.com/${CARNET_REPO}/tar.gz/refs/heads/${CARNE
 systemctl stop carnet
 rm -rf "${APP_DIR:?}.old"; mv "$APP_DIR" "${APP_DIR}.old"; mkdir -p "$APP_DIR"
 cp -a "$TMP"/. "$APP_DIR"/
+[[ -f "$APP_DIR/install/carnet-cli.sh" ]] && install -m 755 "$APP_DIR/install/carnet-cli.sh" /usr/local/bin/carnet
 chown -R root:root "$APP_DIR"; chmod -R u=rwX,go=rX "$APP_DIR"
 systemctl start carnet
 
