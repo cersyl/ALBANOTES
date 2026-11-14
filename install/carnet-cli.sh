@@ -14,9 +14,15 @@ case "${1:-help}" in
   users)   node_cmd users ;;
   revoke)  node_cmd revoke ;;
   backup)
-    f="$DATA_DIR/backups/carnet-$(date +%Y%m%d-%H%M%S).db"
+    stamp=$(date +%Y%m%d-%H%M%S)
+    f="$DATA_DIR/backups/carnet-$stamp.db"
     sqlite3 "$DATA_DIR/carnet.db" ".backup '$f'" && chown carnet:carnet "$f" && echo "Sauvegarde : $f"
-    ls -1t "$DATA_DIR"/backups/carnet-*.db 2>/dev/null | tail -n +11 | xargs -r rm -f ;;
+    # pièces jointes (PDF) : copie instantanée par liens physiques (les fichiers ne changent jamais, aucun espace disque en plus)
+    if [[ -d "$DATA_DIR/files" ]]; then
+      cp -al "$DATA_DIR/files" "$DATA_DIR/backups/files-$stamp" && chown -R carnet:carnet "$DATA_DIR/backups/files-$stamp" && echo "Pièces jointes : $DATA_DIR/backups/files-$stamp"
+    fi
+    ls -1t "$DATA_DIR"/backups/carnet-*.db 2>/dev/null | tail -n +11 | xargs -r rm -f
+    ls -1dt "$DATA_DIR"/backups/files-* 2>/dev/null | tail -n +11 | xargs -r rm -rf ;;
   update)  exec /usr/bin/update ;;
   logs)    journalctl -u carnet -n 100 -f ;;
   status)  systemctl --no-pager status carnet ;;

@@ -1,0 +1,1 @@
+PDF.js 6.4.299, version « legacy » compatible WebView (Mozilla, Apache 2.0) — https://github.com/mozilla/pdf.js

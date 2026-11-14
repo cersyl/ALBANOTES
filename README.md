@@ -4,6 +4,7 @@ ALBANOTES : prise de notes rapide façon Samsung Notes, auto-hébergée, synchro
 
 - **Notes riches** : titre, gras/italique/souligné/barré, titres, couleurs et surlignage, listes à puces/numérotées, **listes de tâches cochables**, séparateurs, alignement
 - **Dessin à main levée** (stylet avec pression, surligneur, gomme, rejet de la paume) et **images** (collage, glisser-déposer, galerie/appareil photo)
+- **PDF** : pièces jointes PDF (bouton 📎, 30 Mo max) lues dans une visionneuse intégrée (zoom, téléchargement, hors connexion une fois ouvertes), **annotation** au stylet ou au doigt (stylo, surligneur, gomme, couleurs), *Importer un PDF à annoter* dans le menu, et **export d'une note en PDF** (menu ⋮ → *Exporter en PDF / imprimer*)
 - **Plusieurs utilisateurs** : chacun a ses notes et ses dossiers ; une note peut être partagée avec tout le monde ou avec des personnes choisies (modifiable par elles), les listes de courses sont communes à tous et fusionnées article par article ; comptes gérés dans *Paramètres → Utilisateurs* (administrateurs)
 - **Listes de courses** : catalogue d'environ 130 produits classés par rayon, ajout rapide avec quantité (« 2 baguettes »), suggestions pendant la saisie, produits personnels mémorisés, articles cochés regroupés « dans le panier »
 - **Couleurs de note**, épinglage, favoris, **dossiers** colorés avec émoticônes (Maison, Bureau, Loisirs, Vie perso, Divers…), recherche, tri, grille/liste, sélection multiple (appui long)
@@ -78,7 +79,7 @@ Le premier compte est l'administrateur **`admin`** (mot de passe choisi à l'ins
 | `carnet logs` / `status` / `restart` / `version` | exploitation |
 | `update` | mise à jour depuis GitHub |
 
-Configuration : `/etc/carnet/carnet.conf` (port, dépôt, branche). Données : `/var/lib/carnet/carnet.db`.
+Pièces jointes : `/var/lib/carnet/files/` (copiées par `carnet backup`). Configuration : `/etc/carnet/carnet.conf` (port, dépôt, branche). Données : `/var/lib/carnet/carnet.db`.
 
 ## Développement local
 

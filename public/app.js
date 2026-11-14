@@ -38,6 +38,11 @@ const ICONS = {
   indent: 'M3 21h18v-2H3v2zM3 8v8l4-4-4-4zm8 9h10v-2H11v2zM3 3v2h18V3H3zm8 6h10V7H11v2zm0 4h10v-2H11v2z',
   outdent: 'M11 17h10v-2H11v2zm-8-5 4 4V8l-4 4zm0 9h18v-2H3v2zM3 3v2h18V3H3zm8 6h10V7H11v2zm0 4h10v-2H11v2z',
   hr: 'M4 11h16v2H4z',
+  pdf: 'M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h3v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z',
+  attach: 'M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z',
+  print: 'M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z',
+  zoomIn: 'M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zm2.5-4h-2v2H9v-2H7V9h2V7h1v2h2v1z',
+  zoomOut: 'M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14zM7 9h5v1H7z',
   add: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z',
   cart: 'M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96 0 1.1.9 2 2 2h12v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63h7.45c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1.003 1.003 0 0 0 20 4H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z',
   freePage: 'M3 3h8v6H3V3zm10 0h8v10h-8V3zM3 11h8v10H3V11zm10 4h8v6h-8v-6z',
@@ -94,6 +99,16 @@ function toast(msg, action, fn, ms = 3500) {
   if (action) t.querySelector('button').onclick = () => { t.hidden = true; fn(); };
   clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, ms);
 }
+function downloadBlob(name, blob) {
+  if (NATIVE?.saveBase64) {
+    const fr = new FileReader();
+    fr.onload = () => toast(NATIVE.saveBase64(name, blob.type || 'application/octet-stream', String(fr.result).split(',')[1]) || 'Fichier enregistré');
+    fr.readAsDataURL(blob); return;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
 function download(name, content, type) {
   if (NATIVE?.saveFile) { toast(NATIVE.saveFile(name, String(content)) || 'Fichier enregistré'); return; }
   const a = document.createElement('a');
@@ -112,8 +127,13 @@ const TRASH_DAYS = 30;
 const DB = (() => {
   let dbp;
   const open = () => dbp ||= new Promise((res, rej) => {
-    const r = indexedDB.open('carnet', 1);
-    r.onupgradeneeded = () => { r.result.createObjectStore('items', { keyPath: 'id' }); r.result.createObjectStore('meta'); };
+    const r = indexedDB.open('carnet', 2);
+    r.onupgradeneeded = () => {
+      const d = r.result;
+      if (!d.objectStoreNames.contains('items')) d.createObjectStore('items', { keyPath: 'id' });
+      if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta');
+      if (!d.objectStoreNames.contains('files')) d.createObjectStore('files', { keyPath: 'id' }); // pièces jointes (PDF) : cache + envois en attente
+    };
     r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
   });
   const done = (t) => new Promise((res, rej) => { t.oncomplete = () => res(); t.onerror = t.onabort = () => rej(t.error); });
@@ -124,7 +144,10 @@ const DB = (() => {
     async del(id) { const d = await open(); const t = d.transaction('items', 'readwrite'); t.objectStore('items').delete(id); return done(t); },
     async getMeta(k) { const d = await open(); return req(d.transaction('meta').objectStore('meta').get(k)); },
     async setMeta(k, v) { const d = await open(); const t = d.transaction('meta', 'readwrite'); t.objectStore('meta').put(v, k); return done(t); },
-    async clear() { const d = await open(); const t = d.transaction(['items', 'meta'], 'readwrite'); t.objectStore('items').clear(); t.objectStore('meta').clear(); return done(t); },
+    async clear() { const d = await open(); const t = d.transaction(['items', 'meta', 'files'], 'readwrite'); ['items', 'meta', 'files'].forEach((n) => t.objectStore(n).clear()); return done(t); },
+    async fileGet(id) { const d = await open(); return req(d.transaction('files').objectStore('files').get(id)); },
+    async filePut(f) { const d = await open(); const t = d.transaction('files', 'readwrite'); t.objectStore('files').put(f); return done(t); },
+    async filesPending() { const d = await open(); return (await req(d.transaction('files').objectStore('files').getAll())).filter((f) => f.pending); },
   };
 })();
 
@@ -225,6 +248,7 @@ async function sync() {
   if (syncing) { syncAgain = true; return; }
   syncing = true; setSync('sync');
   try {
+    uploadPendingFiles(); // pièces jointes en attente (indépendant de la synchro des notes)
     const dirty = [...S.items.values()].filter((i) => i.dirty);
     const since = (await DB.getMeta('rev')) || 0;
     const r = await api('/api/sync', {
@@ -364,6 +388,7 @@ function cardHtml(n) {
     <div class="c-prev">${esc(d.title ? preview : preview.split('\n').slice(1).join('\n'))}</div>
     <div class="c-foot">
       <span>${fmtDate(S.sort === 'created' ? d.created_at || n.updated_at : editedAt(n))}</span>
+      ${/data-file=/.test(d.html || '') ? `<span>· 📄 ${(d.html.match(/data-file=/g) || []).length}</span>` : ''}
       ${d.kind === 'shop' ? `<span>· 🛒 ${total - checked} à acheter</span>` : total ? `<span>· ☑ ${checked}/${total}</span>` : ''}
       ${folder ? `<span>· ${esc(folderEmoji(folder))} ${esc(folder.data.name)}</span>` : ''}
       ${isSharedNote(n) ? `<span class="c-share" title="${esc(shareLabel(n))}">· 👥 ${esc(n.mine === false ? n.owner : n.shared ? 'tous' : (n.shareWith || []).map(personName).join(', '))}</span>` : ''}
@@ -1161,6 +1186,7 @@ const goBack = () => { ignorePop = true; history.back(); };
 window.addEventListener('popstate', () => {
   if (ignorePop) { ignorePop = false; return; }
   if (!$('#sheet').hidden) { closeSheet(); history.pushState({ editor: !ed.root.hidden }, ''); return; }
+  if (!$('#pdfv').hidden) { closePdf(); return; }
   if (!$('#draw').hidden) { closeDraw(); return; }
   if (!ed.root.hidden) closeEditor(true);
 });
@@ -1193,6 +1219,8 @@ const closestInBody = (sel) => { const n = getSelection().anchorNode; const el =
 
 // Cases à cocher
 ed.body.addEventListener('click', (e) => {
+  const att = e.target.closest('.att[data-file]');
+  if (att) { e.preventDefault(); openPdf(att.dataset.file, att.dataset.name); return; }
   const li = e.target.closest('ul.checklist > li');
   if (li && e.target === li && e.offsetX < 28) {
     li.dataset.checked = li.dataset.checked === 'true' ? 'false' : 'true';
@@ -1278,6 +1306,10 @@ function insertImage(src, cls = '') {
   saveRange();
   markDirty();
 }
+$('#pdfInput')?.addEventListener('change', async (e) => {
+  for (const f of e.target.files) await attachPdf(f);
+  e.target.value = '';
+});
 $('#imgInput').addEventListener('change', async (e) => {
   for (const f of e.target.files) insertImage(await compressImage(f));
   e.target.value = '';
@@ -1292,6 +1324,7 @@ $('#edTools').addEventListener('click', (e) => {
   if (cmd === 'block') return isFree() ? (restoreRange(), undefined) : createBlock();
   if (cmd === 'free') return toggleFree();
   if (cmd === 'image') return $('#imgInput').click();
+  if (cmd === 'pdf') return $('#pdfInput').click();
   if (cmd === 'draw') return openDraw();
   if (cmd === 'text') return textStyleMenu();
   if (cmd === 'color') return colorMenu('foreColor');
@@ -1347,6 +1380,7 @@ function editorMore() {
     <button class="sheet-item" data-a="move">${ic('folder')}<span>Déplacer vers un dossier</span></button>
     <button class="sheet-item" data-a="copy">${ic('copy')}<span>Copier le texte</span></button>
     ${navigator.share ? `<button class="sheet-item" data-a="share">${ic('share')}<span>Partager</span></button>` : ''}
+    <button class="sheet-item" data-a="print">${ic('print')}<span>Exporter en PDF / imprimer</span></button>
     <button class="sheet-item" data-a="txt">${ic('download')}<span>Exporter en .txt</span></button>
     ${d.trashed
       ? `<button class="sheet-item" data-a="restore">${ic('restore')}<span>Restaurer</span></button>
@@ -1366,6 +1400,7 @@ function editorMore() {
     if (a === 'move') { const f = await pickFolder(cur.data.folder); if (f !== undefined) { await updateNote(cur.id, { folder: f }); S.edSaved = true; } }
     if (a === 'copy') { await navigator.clipboard?.writeText(text); toast('Texte copié'); }
     if (a === 'share') navigator.share({ title: cur.data.title || 'Note', text }).catch(() => {});
+    if (a === 'print') { printNote(); return; }
     if (a === 'txt') download(`${(cur.data.title || 'note').replace(/[\\/:*?"<>|]/g, '_')}.txt`, text, 'text/plain;charset=utf-8');
     if (a === 'delete') { await updateNote(cur.id, { trashed: true, trashed_at: Date.now(), pinned: false }); S.edSaved = true; await closeEditor(); toast('Note placée dans la corbeille', 'Annuler', async () => { await updateNote(cur.id, { trashed: false, trashed_at: null }); render(); }); return; }
     if (a === 'restore') { await updateNote(cur.id, { trashed: false, trashed_at: null }); toast('Note restaurée'); }
@@ -1907,6 +1942,259 @@ async function toggleFree() {
   markDirty(); relayout();
 }
 
+/* ================= PDF : pièces jointes, visionneuse, annotation ================= */
+const PDF_MAX = 30 * 1024 * 1024;
+const fmtSize = (n) => n >= 1048576 ? `${(n / 1048576).toFixed(1).replace('.', ',')} Mo` : `${Math.max(1, Math.round(n / 1024))} Ko`;
+const blobToB64 = (blob) => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.onerror = rej; fr.readAsDataURL(blob); });
+let uploading = false;
+async function uploadPendingFiles() {
+  if (uploading || !S.token) return;
+  uploading = true;
+  try {
+    for (const f of await DB.filesPending()) {
+      await api('/api/files', { action: 'upload', id: f.id, note: f.note, name: f.name, mime: f.mime, data: await blobToB64(new Blob([f.data])) });
+      await DB.filePut({ ...f, pending: false });
+    }
+  } catch { /* nouvel essai à la prochaine synchro */ } finally { uploading = false; }
+}
+async function readPdf(file) {
+  if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) { toast(`${file.name} : ce n’est pas un PDF`); return null; }
+  if (file.size > PDF_MAX) { toast(`${file.name} : trop volumineux (30 Mo max)`); return null; }
+  const data = await file.arrayBuffer();
+  if (new TextDecoder().decode(new Uint8Array(data, 0, 5)) !== '%PDF-') { toast(`${file.name} : fichier PDF invalide`); return null; }
+  return data;
+}
+const attHtml = (id, name, size) => `<div class="att" contenteditable="false" data-file="${esc(id)}" data-name="${esc(name)}" data-size="${size}"><span class="att-ic">PDF</span><span class="att-name">${esc(name)}</span><span class="att-size">${fmtSize(size)}</span></div><div><br></div>`;
+async function storePdf(file, data, noteId) {
+  const id = uid();
+  await DB.filePut({ id, note: noteId, name: file.name, mime: 'application/pdf', size: data.byteLength, data, pending: true });
+  uploadPendingFiles();
+  return id;
+}
+async function attachPdf(file) {
+  const data = await readPdf(file); if (!data) return;
+  const id = await storePdf(file, data, S.editing);
+  restoreRange();
+  let list = closestInBody('ul, ol');
+  if (list) { const d = document.createElement('div'); d.innerHTML = '<br>'; list.after(d); const r = document.createRange(); r.setStart(d, 0); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); }
+  document.execCommand('insertHTML', false, attHtml(id, file.name, data.byteLength));
+  saveRange(); markDirty();
+  toast(`${file.name} joint à la note`);
+}
+// Importer un PDF à annoter : nouvelle note contenant le PDF, ouverte directement en mode annotation
+$('#pdfImport')?.addEventListener('change', async (e) => {
+  const file = e.target.files[0]; if (!file) return;
+  const data = await readPdf(file); if (!data) return;
+  const folder = !['all', 'fav', 'trash', 'shop', 'shared'].includes(S.view) ? S.view : null;
+  const it = { id: uid(), type: 'note', deleted: false, updated_at: Date.now(), dirty: false, shared: S.view === 'shared', mine: true,
+    data: { title: file.name.replace(/\.pdf$/i, ''), html: '', text: file.name, order: Math.min(0, ...notes().map((n) => n.data.order ?? 0)) - 1000,
+      folder, color: 'default', fav: false, pinned: false, trashed: false, created_at: Date.now(), edited_at: Date.now() } };
+  const fid = await storePdf(file, data, it.id);
+  it.data.html = attHtml(fid, file.name, data.byteLength);
+  S.items.set(it.id, it);
+  await saveItem(it); render();
+  openEditor(it.id, false); S.edSaved = true;
+  openPdf(fid, file.name, true);
+});
+
+let PDFJS = null;
+async function loadPdfjs() {
+  if (PDFJS) return PDFJS;
+  // embarqué dans l'appli ; secours : depuis le serveur (applis installées avant l'ajout des PDF)
+  const bases = ['/vendor/pdfjs/']; if (NATIVE && SERVER) bases.push(SERVER + '/vendor/pdfjs/');
+  let last;
+  for (const b of bases) {
+    try {
+      const base = new URL(b, location.href).href;
+      const lib = await import(base + 'pdf.min.mjs');
+      const code = await (await fetch(base + 'pdf.worker.min.mjs')).text();
+      lib.GlobalWorkerOptions.workerPort = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })), { type: 'module' });
+      return (PDFJS = { lib, base });
+    } catch (e) { last = e; }
+  }
+  throw last || new Error('PDF.js indisponible');
+}
+async function getPdfData(id) {
+  const cached = await DB.fileGet(id);
+  if (cached?.data) return cached;
+  const opts = NATIVE
+    ? { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ action: 'get', id, _token: S.token }) }
+    : { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + S.token }, body: JSON.stringify({ action: 'get', id }) };
+  let r;
+  try { r = await fetch(SERVER + '/api/files', opts); } catch { throw new Error('Serveur injoignable : ce PDF n’a pas encore été téléchargé sur cet appareil.'); }
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'PDF introuvable');
+  const f = { id, name: '', mime: r.headers.get('content-type') || 'application/pdf', data: await r.arrayBuffer(), pending: false };
+  f.size = f.data.byteLength;
+  await DB.filePut(f).catch(() => {}); // gardé pour la consultation hors connexion
+  return f;
+}
+
+/* ---- visionneuse ---- */
+const PV = { doc: null, fileId: null, noteId: null, name: '', zoom: 1, annot: false, tool: 'pen', color: '#e53935', size: 3,
+  pages: [], strokes: {}, history: [], penSeen: false, io: null, cur: null };
+const PV_COLORS = ['#1a1a1a', '#e53935', '#fb8c00', '#fdd835', '#43a047', '#1e88e5', '#8e24aa'];
+async function openPdf(fileId, name, annotate = false) {
+  commitEditor();
+  const box = $('#pdfv');
+  PV.fileId = fileId; PV.noteId = S.editing; PV.name = name || 'document.pdf'; PV.zoom = 1; PV.history = [];
+  const note = S.items.get(PV.noteId);
+  PV.strokes = JSON.parse(JSON.stringify(note?.data.pdfAnnots?.[fileId] || {}));
+  $('#pvName').textContent = PV.name; $('#pvInfo').textContent = 'Chargement…';
+  $('#pvPages').innerHTML = '<div class="pv-loading">Chargement du PDF…</div>';
+  box.hidden = false; history.pushState({ editor: true, pdf: true }, '');
+  setAnnot(annotate);
+  try {
+    const [{ lib, base }, file] = await Promise.all([loadPdfjs(), getPdfData(fileId)]);
+    PV.data = file.data;
+    PV.doc = await lib.getDocument({ data: new Uint8Array(file.data.slice(0)), standardFontDataUrl: base + 'standard_fonts/', wasmUrl: base + 'wasm/',
+      useSystemFonts: true, isEvalSupported: false }).promise;
+    PV.pages = [];
+    for (let i = 1; i <= PV.doc.numPages; i++) PV.pages.push(await PV.doc.getPage(i));
+    $('#pvInfo').textContent = `${PV.doc.numPages} page${PV.doc.numPages > 1 ? 's' : ''} · ${fmtSize(file.size || file.data.byteLength)}`;
+    buildPages();
+  } catch (e) {
+    $('#pvPages').innerHTML = `<div class="pv-loading">⚠️ ${esc(e.message || 'Impossible d’ouvrir ce PDF')}</div>`;
+    $('#pvInfo').textContent = '';
+  }
+}
+function closePdf() {
+  flushAnnots();
+  $('#pdfv').hidden = true;
+  PV.io?.disconnect(); PV.io = null;
+  try { PV.doc?.destroy(); } catch {}
+  PV.doc = null; PV.pages = []; $('#pvPages').innerHTML = '';
+}
+function buildPages() {
+  const wrap = $('#pvPages'); wrap.innerHTML = '';
+  PV.io?.disconnect();
+  PV.io = new IntersectionObserver((ents) => ents.forEach((en) => { if (en.isIntersecting) renderPage(+en.target.dataset.i); }), { root: wrap, rootMargin: '600px 0px' });
+  const W = Math.max(200, Math.min(wrap.clientWidth - 24, 1100)) * PV.zoom;
+  PV.pages.forEach((page, i) => {
+    const vp = page.getViewport({ scale: 1 });
+    const h = W * vp.height / vp.width;
+    const d = document.createElement('div');
+    d.className = 'pv-page'; d.dataset.i = i; d.style.width = W + 'px'; d.style.height = h + 'px';
+    d.innerHTML = `<canvas class="pv-pdf"></canvas><canvas class="pv-ink"></canvas><span class="pv-num">${i + 1}</span>`;
+    wrap.appendChild(d); PV.io.observe(d);
+    bindInk(d.querySelector('.pv-ink'), i);
+  });
+  wrap.classList.toggle('zoomed', PV.zoom > 1);
+}
+async function renderPage(i) {
+  const el = $(`#pvPages .pv-page[data-i="${i}"]`); if (!el || el.dataset.done === String(PV.zoom)) return;
+  el.dataset.done = String(PV.zoom);
+  const page = PV.pages[i], W = parseFloat(el.style.width), H = parseFloat(el.style.height);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const vp = page.getViewport({ scale: (W / page.getViewport({ scale: 1 }).width) * dpr });
+  const c = el.querySelector('.pv-pdf');
+  c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+  const ink = el.querySelector('.pv-ink'); ink.width = c.width; ink.height = c.height;
+  try { await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise; }
+  catch (e) {
+    if (e?.name !== 'RenderingCancelledException') {
+      el.insertAdjacentHTML('beforeend', `<div class="pv-err">⚠️ Page illisible : ${esc(e?.message || 'erreur inconnue')}</div>`);
+      console.error('PDF', e);
+    }
+  }
+  drawInk(i);
+}
+/* annotations : traits en coordonnées relatives (0..1) à la page, stockés dans la note */
+function strokePath(ctx, s, W, H) {
+  ctx.save();
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.globalAlpha = s.t === 'marker' ? 0.35 : 1;
+  ctx.strokeStyle = s.c; ctx.fillStyle = s.c;
+  const w = (s.w || 0.004) * W;
+  const P = s.p.map(([x, y]) => [x * W, y * H]);
+  if (P.length === 1) { ctx.beginPath(); ctx.arc(P[0][0], P[0][1], w / 2, 0, Math.PI * 2); ctx.fill(); ctx.restore(); return; }
+  ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(P[0][0], P[0][1]);
+  for (let k = 1; k < P.length - 1; k++) ctx.quadraticCurveTo(P[k][0], P[k][1], (P[k][0] + P[k + 1][0]) / 2, (P[k][1] + P[k + 1][1]) / 2);
+  ctx.lineTo(P.at(-1)[0], P.at(-1)[1]); ctx.stroke(); ctx.restore();
+}
+function drawInk(i, live) {
+  const c = $(`#pvPages .pv-page[data-i="${i}"] .pv-ink`); if (!c || !c.width) return;
+  const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height);
+  for (const s of PV.strokes[i] || []) strokePath(ctx, s, c.width, c.height);
+  if (live) strokePath(ctx, live, c.width, c.height);
+}
+function bindInk(c, i) {
+  const pos = (e) => { const r = c.getBoundingClientRect(); return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height, e.pointerType === 'pen' ? e.pressure : 0.5]; };
+  c.addEventListener('pointerdown', (e) => {
+    if (!PV.annot) return;
+    if (e.pointerType === 'pen' && !PV.penSeen) { PV.penSeen = true; $('#pdfv').classList.add('pen-seen'); }
+    if (PV.penSeen && e.pointerType === 'touch') return; // stylet détecté : le doigt fait défiler
+    e.preventDefault(); c.setPointerCapture(e.pointerId);
+    if (PV.tool === 'eraser') { PV.cur = { erase: true, id: e.pointerId }; eraseAt(i, pos(e)); return; }
+    PV.cur = { id: e.pointerId, s: { t: PV.tool, c: PV.color, w: (PV.tool === 'marker' ? PV.size * 4 : PV.size) / 700, p: [pos(e)] } };
+  });
+  c.addEventListener('pointermove', (e) => {
+    if (!PV.cur || PV.cur.id !== e.pointerId) return;
+    if (PV.cur.erase) { eraseAt(i, pos(e)); return; }
+    for (const ev of e.getCoalescedEvents?.() || [e]) PV.cur.s.p.push(pos(ev));
+    drawInk(i, PV.cur.s);
+  });
+  const end = (e) => {
+    if (!PV.cur || PV.cur.id !== e.pointerId) return;
+    if (!PV.cur.erase) {
+      const s = PV.cur.s; s.p = s.p.map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)]);
+      (PV.strokes[i] ||= []).push(s); PV.history.push(i);
+      drawInk(i); markAnnots();
+    }
+    PV.cur = null;
+  };
+  c.addEventListener('pointerup', end); c.addEventListener('pointercancel', end);
+}
+function eraseAt(i, [x, y]) {
+  const list = PV.strokes[i]; if (!list?.length) return;
+  const keep = list.filter((s) => !s.p.some(([a, b]) => Math.hypot(a - x, (b - y) * 1.3) < 0.02));
+  if (keep.length !== list.length) { PV.strokes[i] = keep; drawInk(i); markAnnots(); }
+}
+const markAnnots = () => { PV.annDirty = true; saveAnnots(); };
+const saveAnnots = debounce(() => {
+  const it = S.items.get(PV.noteId); if (!it || !PV.fileId || !PV.annDirty) return;
+  PV.annDirty = false;
+  const all = { ...(it.data.pdfAnnots || {}) };
+  const clean = Object.fromEntries(Object.entries(PV.strokes).filter(([, v]) => v.length));
+  if (Object.keys(clean).length) all[PV.fileId] = clean; else delete all[PV.fileId];
+  updateNote(it.id, { pdfAnnots: all, edited_at: Date.now() }).then(() => { S.edSaved = true; updateEditorMeta(); });
+}, 700);
+const flushAnnots = () => saveAnnots.flush?.();
+function setAnnot(on) {
+  PV.annot = on;
+  $('#pdfv').classList.toggle('annot', on);
+  $('#pvTools').hidden = !on;
+  $('[data-pv="annot"]').classList.toggle('on', on);
+}
+$('#pvColors') && ($('#pvColors').innerHTML = PV_COLORS.map((c) => `<button class="sw${c === PV.color ? ' active' : ''}" style="background:${c}" data-pc="${c}"></button>`).join(''));
+$('#pdfv')?.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-pv],[data-pc],[data-pt]'); if (!b) return;
+  if (b.dataset.pc) { PV.color = b.dataset.pc; $$('#pvColors .sw').forEach((x) => x.classList.toggle('active', x === b)); if (PV.tool === 'eraser') b.closest('.pv-tools').querySelector('[data-pt="pen"]').click(); return; }
+  if (b.dataset.pt) { PV.tool = b.dataset.pt; $$('#pvTools [data-pt]').forEach((x) => x.classList.toggle('active', x === b)); return; }
+  const a = b.dataset.pv;
+  if (a === 'close') { closePdf(); goBack(); }
+  if (a === 'annot') setAnnot(!PV.annot);
+  if (a === 'zoomin' || a === 'zoomout') {
+    if (!PV.doc) return;
+    PV.zoom = Math.max(0.5, Math.min(3, PV.zoom * (a === 'zoomin' ? 1.25 : 0.8)));
+    const wrap = $('#pvPages'), ratio = wrap.scrollTop / Math.max(1, wrap.scrollHeight);
+    buildPages(); wrap.scrollTop = ratio * wrap.scrollHeight;
+  }
+  if (a === 'undo') { const i = PV.history.pop(); if (i != null && PV.strokes[i]?.length) { PV.strokes[i].pop(); drawInk(i); markAnnots(); } }
+  if (a === 'download' && PV.data) downloadBlob(PV.name.endsWith('.pdf') ? PV.name : PV.name + '.pdf', new Blob([PV.data], { type: 'application/pdf' }));
+});
+$('#pvSize')?.addEventListener('input', (e) => { PV.size = +e.target.value; });
+
+/* ---- export d'une note en PDF : impression (« Enregistrer en PDF ») ---- */
+async function printNote() {
+  await commitEditor();
+  const title = ed.title.value.trim() || 'Note';
+  const prev = document.title; document.title = title.replace(/[\\/:*?"<>|]/g, '_');
+  if (NATIVE?.print) { NATIVE.print(document.title); setTimeout(() => { document.title = prev; }, 4000); return; }
+  if (NATIVE && !window.print) { toast('Mettez à jour l’appli pour imprimer'); return; }
+  toast('Choisissez « Enregistrer au format PDF » comme imprimante', null, null, 5000);
+  setTimeout(() => { window.print(); document.title = prev; }, 300);
+}
+
 /* ================= Dessin à main levée ================= */
 const D = { strokes: [], redo: [], tool: 'pen', color: '#1a1a1a', size: 3, cur: null, penSeen: false, dpr: 1, base: $('#drawBase'), live: $('#drawLive') };
 const DRAW_COLORS = ['#1a1a1a', '#e53935', '#fb8c00', '#fdd835', '#43a047', '#1e88e5', '#8e24aa', '#ffffff'];
@@ -2018,6 +2306,7 @@ document.addEventListener('click', async (e) => {
     case 'drawer': return openDrawer();
     case 'settings': return settingsMenu();
     case 'new-folder': { closeDrawer(); const f = await createFolder(); if (f) setView(f.id); return; }
+    case 'import-pdf': { closeDrawer(); const inp = $('#pdfImport'); inp.value = ''; inp.click(); return; }
     case 'new-note': return S.view === 'shop' ? newShop() : newNote();
     case 'search': return toggleSearch(true);
     case 'layout': S.layout = S.layout === 'grid' ? 'list' : 'grid'; pref.set('layout', S.layout); return render();
@@ -2033,6 +2322,7 @@ document.addEventListener('click', async (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!$('#sheet').hidden) return closeSheet();
+    if (!$('#pdfv').hidden) { closePdf(); return goBack(); }
     if (!$('#draw').hidden) return drawAction('draw-cancel');
     if (!ed.root.hidden) return closeEditor();
     if (S.selecting) return exitSelection();
@@ -2063,7 +2353,7 @@ async function purgeTrash() {
 /* Mises à jour automatiques : la nouvelle version s'applique dès que l'utilisateur
    n'est pas en train d'écrire (éditeur, dessin ou menu fermés). */
 let pendingWorker = null;
-const busy = () => !ed.root.hidden || !$('#draw').hidden || !$('#sheet').hidden;
+const busy = () => !ed.root.hidden || !$('#draw').hidden || !$('#sheet').hidden || !$('#pdfv').hidden;
 function tryApplyUpdate() {
   if (!pendingWorker || busy()) return;
   const w = pendingWorker; pendingWorker = null;

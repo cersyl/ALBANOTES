@@ -10,6 +10,10 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.print.PrintAttributes;
+import android.print.PrintDocumentAdapter;
+import android.print.PrintManager;
+import android.util.Base64;
 import android.provider.MediaStore;
 import android.security.KeyChain;
 import android.webkit.ClientCertRequest;
@@ -203,7 +207,10 @@ public class MainActivity extends Activity {
     static String mimeOf(String name) {
         String n = name.toLowerCase();
         if (n.endsWith(".html")) return "text/html";
-        if (n.endsWith(".js")) return "text/javascript";
+        if (n.endsWith(".js") || n.endsWith(".mjs")) return "text/javascript";
+        if (n.endsWith(".wasm")) return "application/wasm";
+        if (n.endsWith(".ttf")) return "font/ttf";
+        if (n.endsWith(".pdf")) return "application/pdf";
         if (n.endsWith(".css")) return "text/css";
         if (n.endsWith(".json")) return "application/json";
         if (n.endsWith(".webmanifest")) return "application/manifest+json";
@@ -384,36 +391,64 @@ public class MainActivity extends Activity {
             }
         }
 
-        /** Exports (JSON, .txt) : dossier Téléchargements/ALBANOTES. */
+        /** Export d'une note en PDF : service d'impression Android (« Enregistrer au format PDF »). */
         @JavascriptInterface
-        public String saveFile(String name, String content) {
-            String safe = (name == null ? "albanotes.txt" : name).replaceAll("[\\\\/:*?\"<>|]", "_");
-            byte[] bytes = (content == null ? "" : content).getBytes(StandardCharsets.UTF_8);
+        public void print(final String title) {
+            runOnUiThread(() -> {
+                PrintManager pm = (PrintManager) getSystemService(PRINT_SERVICE);
+                if (pm == null) return;
+                String name = (title == null || title.isEmpty()) ? "ALBANOTES" : title;
+                PrintDocumentAdapter adapter = web.createPrintDocumentAdapter(name);
+                pm.print(name, adapter, new PrintAttributes.Builder().build());
+            });
+        }
+
+        /** Enregistre un fichier binaire (PDF joint) dans Téléchargements/ALBANOTES. */
+        @JavascriptInterface
+        public String saveBase64(String name, String mime, String b64) {
             try {
-                if (Build.VERSION.SDK_INT >= 29) {
-                    ContentValues cv = new ContentValues();
-                    cv.put(MediaStore.MediaColumns.DISPLAY_NAME, safe);
-                    cv.put(MediaStore.MediaColumns.MIME_TYPE, safe.endsWith(".json") ? "application/json" : "text/plain");
-                    cv.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/ALBANOTES");
-                    Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
-                    if (uri == null) return "Enregistrement impossible";
-                    try (OutputStream out = getContentResolver().openOutputStream(uri)) {
-                        if (out == null) return "Enregistrement impossible";
-                        out.write(bytes);
-                    }
-                    return "Enregistré dans Téléchargements/ALBANOTES/" + safe;
-                }
-                File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
-                if (dir == null) dir = getFilesDir();
-                File f = new File(dir, safe);
-                try (OutputStream out = new FileOutputStream(f)) {
-                    out.write(bytes);
-                }
-                return "Enregistré dans " + f.getAbsolutePath();
+                return writeDownload(name, mime, Base64.decode(b64 == null ? "" : b64, Base64.DEFAULT));
             } catch (Exception e) {
                 return "Enregistrement impossible : " + e.getMessage();
             }
         }
+
+        /** Exports (JSON, .txt) : dossier Téléchargements/ALBANOTES. */
+        @JavascriptInterface
+        public String saveFile(String name, String content) {
+            byte[] bytes = (content == null ? "" : content).getBytes(StandardCharsets.UTF_8);
+            String n = name == null ? "albanotes.txt" : name;
+            try {
+                return writeDownload(n, n.endsWith(".json") ? "application/json" : "text/plain", bytes);
+            } catch (Exception e) {
+                return "Enregistrement impossible : " + e.getMessage();
+            }
+        }
+    }
+
+    /** Écrit un fichier dans Téléchargements/ALBANOTES (Android 10+) ou le dossier de l'appli. */
+    String writeDownload(String name, String mime, byte[] bytes) throws IOException {
+        String safe = (name == null ? "albanotes" : name).replaceAll("[\\\\/:*?\"<>|]", "_");
+        if (Build.VERSION.SDK_INT >= 29) {
+            ContentValues cv = new ContentValues();
+            cv.put(MediaStore.MediaColumns.DISPLAY_NAME, safe);
+            cv.put(MediaStore.MediaColumns.MIME_TYPE, mime == null ? "application/octet-stream" : mime);
+            cv.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/ALBANOTES");
+            Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+            if (uri == null) return "Enregistrement impossible";
+            try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+                if (out == null) return "Enregistrement impossible";
+                out.write(bytes);
+            }
+            return "Enregistré dans Téléchargements/ALBANOTES/" + safe;
+        }
+        File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+        if (dir == null) dir = getFilesDir();
+        File f = new File(dir, safe);
+        try (OutputStream out = new FileOutputStream(f)) {
+            out.write(bytes);
+        }
+        return "Enregistré dans " + f.getAbsolutePath();
     }
 
     static void writeText(File f, String text) throws IOException {

@@ -36,7 +36,9 @@
       <button class="icon-btn" data-action="settings" title="Paramètres"><i data-i="settings"></i></button>
     </div>
     <div id="drawerList" class="drawer-list"></div>
+    <button class="drawer-item add" data-action="import-pdf"><i data-i="pdf"></i><span>Importer un PDF à annoter</span></button>
     <button class="drawer-item add" data-action="new-folder"><i data-i="folderPlus"></i><span>Nouveau dossier</span></button>
+    <input id="pdfImport" type="file" accept="application/pdf,.pdf" hidden>
   </nav>
 
   <!-- Liste des notes -->
@@ -102,6 +104,7 @@
       <button class="tool" data-cmd="free" title="Page libre (style OneNote)"><i data-i="freePage"></i></button>
       <button class="tool" data-cmd="draw" title="Dessin"><i data-i="pen"></i></button>
       <button class="tool" data-cmd="image" title="Image"><i data-i="image"></i></button>
+      <button class="tool" data-cmd="pdf" title="Joindre un PDF"><i data-i="attach"></i></button>
       <span class="sep"></span>
       <button class="tool" data-cmd="text" title="Style du texte"><i data-i="textSize"></i></button>
       <button class="tool" data-cmd="bold" title="Gras (Ctrl+B)"><i data-i="bold"></i></button>
@@ -117,6 +120,7 @@
       <button class="tool" data-cmd="hr" title="Séparateur"><i data-i="hr"></i></button>
     </div>
     <input id="imgInput" type="file" accept="image/*" hidden multiple>
+    <input id="pdfInput" type="file" accept="application/pdf,.pdf" hidden multiple>
   </section>
 
   <!-- Dessin -->
@@ -144,6 +148,28 @@
   </section>
 
   <!-- Feuille / menus / dialogues -->
+  <!-- Visionneuse PDF -->
+  <section id="pdfv" class="pdfv" hidden>
+    <header class="ed-top pv-top">
+      <button class="icon-btn" data-pv="close" title="Retour"><i data-i="back"></i></button>
+      <div class="pv-title"><b id="pvName"></b><small id="pvInfo"></small></div>
+      <button class="icon-btn" data-pv="zoomout" title="Zoom arrière"><i data-i="zoomOut"></i></button>
+      <button class="icon-btn" data-pv="zoomin" title="Zoom avant"><i data-i="zoomIn"></i></button>
+      <button class="icon-btn" data-pv="annot" title="Annoter"><i data-i="pen"></i></button>
+      <button class="icon-btn" data-pv="download" title="Télécharger"><i data-i="download"></i></button>
+    </header>
+    <div class="pv-tools draw-tools" id="pvTools" hidden>
+      <button class="tool active" data-pt="pen" title="Stylo"><i data-i="pen"></i></button>
+      <button class="tool" data-pt="marker" title="Surligneur"><i data-i="highlight"></i></button>
+      <button class="tool" data-pt="eraser" title="Gomme"><i data-i="eraser"></i></button>
+      <button class="tool" data-pv="undo" title="Annuler le trait"><i data-i="undo"></i></button>
+      <span class="sep"></span>
+      <div id="pvColors" class="swatches"></div>
+      <input id="pvSize" type="range" min="1" max="12" value="3" title="Épaisseur">
+    </div>
+    <div class="pv-pages" id="pvPages"></div>
+  </section>
+
   <div id="sheet" class="sheet" hidden><div class="sheet-card" id="sheetCard"></div></div>
   <div id="toast" class="toast" hidden></div>
 

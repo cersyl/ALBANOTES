@@ -1,7 +1,8 @@
 /* ALBANOTES — service worker (version injectée par le serveur) */
 const VERSION = '__VERSION__';
 const CACHE = 'carnet-' + VERSION;
-const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png'];
+const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
+  '/vendor/pdfjs/pdf.min.mjs', '/vendor/pdfjs/pdf.worker.min.mjs'];
 
 self.addEventListener('install', (e) => {
   // activation immédiate : une version défaillante ne peut jamais bloquer la suivante
@@ -21,6 +22,14 @@ self.addEventListener('fetch', (e) => {
   // Navigation : coquille en cache (cohérente avec app.js/app.css de la même version)
   if (e.request.mode === 'navigate') {
     e.respondWith(caches.match('/index.html').then((hit) => hit || fetch(e.request)));
+    return;
+  }
+  // ressources de la visionneuse PDF (polices, décodeurs) : gardées après la première utilisation
+  if (url.pathname.startsWith('/vendor/')) {
+    e.respondWith(caches.match(e.request).then((hit) => hit || fetch(e.request).then((r) => {
+      if (r.ok) { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
+      return r;
+    })));
     return;
   }
   e.respondWith(caches.match(e.request).then((hit) => hit || fetch(e.request)));

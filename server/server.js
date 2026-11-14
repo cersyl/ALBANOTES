@@ -21,10 +21,13 @@ const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const VERSION = fs.readFileSync(path.join(ROOT, 'VERSION'), 'utf8').trim();
-const MAX_BODY = 50 * 1024 * 1024; // 50 Mo (images et croquis inclus dans les notes)
+const MAX_BODY = 50 * 1024 * 1024; // 50 Mo (images et croquis inclus dans les notes, PDF en base64)
 const PERSONAL = ['folder', 'fav', 'pinned', 'order']; // champs propres à chaque utilisateur
+const MAX_FILE = 30 * 1024 * 1024; // pièces jointes (PDF) : 30 Mo
+const FILES_DIR = path.join(DATA_DIR, 'files');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(FILES_DIR, { recursive: true });
 const DB_FILE = path.join(DATA_DIR, 'carnet.db');
 const db = new DatabaseSync(DB_FILE);
 // attendre jusqu'à 10 s si la base est verrouillée (service + commande carnet simultanés)
@@ -55,6 +58,16 @@ db.exec(`
     admin INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS files (
+    id TEXT PRIMARY KEY,
+    owner INTEGER NOT NULL,
+    note_id TEXT,
+    name TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS files_note ON files(note_id);
   CREATE TABLE IF NOT EXISTS item_shares (
     item_id TEXT NOT NULL,
     user_id INTEGER NOT NULL,
@@ -211,6 +224,8 @@ const MIME = {
   '.css': 'text/css; charset=utf-8', '.json': 'application/json',
   '.webmanifest': 'application/manifest+json', '.png': 'image/png',
   '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8', '.wasm': 'application/wasm', '.pfb': 'application/octet-stream',
+  '.ttf': 'font/ttf',
 };
 const SEC_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
@@ -323,6 +338,18 @@ function mergeShop(a, ta, b, tb) {
   return { ...newer, items, removed, custom };
 }
 
+const qFileGet = db.prepare('SELECT * FROM files WHERE id = ?');
+const qFilesOfNote = db.prepare('SELECT id FROM files WHERE note_id = ?');
+const fileIdOk = (id) => typeof id === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(id);
+const filePath = (id) => path.join(FILES_DIR, id);
+/** Pièces jointes d'une note supprimée définitivement : effacées. */
+function purgeFiles(noteId) {
+  for (const f of qFilesOfNote.all(noteId)) {
+    try { fs.unlinkSync(filePath(f.id)); } catch { /* déjà absent */ }
+    db.prepare('DELETE FROM files WHERE id = ?').run(f.id);
+  }
+}
+
 /** Applique une modification envoyée par un client ; renvoie true si la base a changé. */
 function applyChange(user, c, nextRev) {
   if (!c || typeof c.id !== 'string' || c.id.length > 64 || !['note', 'folder'].includes(c.type)) return false;
@@ -368,6 +395,7 @@ function applyChange(user, c, nextRev) {
   if (isOwner && c.type === 'note' && Array.isArray(c.shareWith)) setShares(c.id, owner, shared ? [] : c.shareWith);
   if (meta) qMetaPut.run(user.id, c.id, JSON.stringify(meta));
   qItemPut.run(c.id, c.type, data ? JSON.stringify(data) : null, updated, c.deleted ? 1 : 0, nextRev(), owner, shared);
+  if (c.deleted) purgeFiles(c.id);
   return true;
 }
 
@@ -447,6 +475,35 @@ async function handleApi(req, res, pathname) {
     return send(res, 200, out);
   }
 
+  /* Pièces jointes (PDF) : { action: upload, id, note, name, mime, data (base64) } | { action: get, id } */
+  if (pathname === '/api/files' && req.method === 'POST') {
+    if (!fileIdOk(body.id)) return send(res, 400, { error: 'Identifiant de fichier invalide.' });
+    const f = qFileGet.get(body.id);
+    if (body.action === 'upload') {
+      if (f) return send(res, 200, { ok: true, id: f.id, size: f.size }); // déjà reçu (nouvel essai après coupure)
+      const buf = Buffer.from(String(body.data || ''), 'base64');
+      if (!buf.length) return send(res, 400, { error: 'Fichier vide.' });
+      if (buf.length > MAX_FILE) return send(res, 413, { error: 'Fichier trop volumineux (30 Mo max).' });
+      const mime = String(body.mime || 'application/octet-stream').slice(0, 100);
+      if (mime === 'application/pdf' && buf.subarray(0, 5).toString('latin1') !== '%PDF-') return send(res, 400, { error: 'Ce fichier n’est pas un PDF valide.' });
+      fs.writeFileSync(filePath(body.id) + '.tmp', buf);
+      fs.renameSync(filePath(body.id) + '.tmp', filePath(body.id));
+      db.prepare('INSERT INTO files(id, owner, note_id, name, mime, size, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)')
+        .run(body.id, me.id, typeof body.note === 'string' ? body.note.slice(0, 64) : null, String(body.name || 'document.pdf').slice(0, 200), mime, buf.length, Date.now());
+      return send(res, 200, { ok: true, id: body.id, size: buf.length });
+    }
+    if (body.action === 'get') {
+      if (!f) return send(res, 404, { error: 'Pièce jointe introuvable.' });
+      const note = f.note_id ? qItemFull.get(f.note_id) : null;
+      if (f.owner !== me.id && !(note && canSee(me, note))) return send(res, 403, { error: 'Accès refusé.' });
+      let buf;
+      try { buf = fs.readFileSync(filePath(f.id)); } catch { return send(res, 404, { error: 'Fichier absent du serveur.' }); }
+      res.writeHead(200, { ...SEC_HEADERS, ...corsHeaders(req), 'Content-Type': f.mime, 'Content-Length': buf.length, 'Cache-Control': 'private, no-store' });
+      return res.end(buf);
+    }
+    return send(res, 400, { error: 'Action inconnue.' });
+  }
+
   /* Gestion des comptes (administrateurs) : { action: list | add | passwd | rename | admin | delete } */
   if (pathname === '/api/users' && req.method === 'POST') {
     if (!me.admin) return send(res, 403, { error: 'Réservé aux administrateurs.' });
@@ -495,6 +552,7 @@ async function handleApi(req, res, pathname) {
             db.prepare('UPDATE items SET owner = ?, rev = ?, updated_at = updated_at + 1 WHERE id = ?').run(me.id, rev, it.id);
           } else {
             db.prepare('UPDATE items SET deleted = 1, data = NULL, rev = ?, updated_at = updated_at + 1 WHERE id = ?').run(rev, it.id);
+            purgeFiles(it.id);
           }
         }
         db.prepare('DELETE FROM item_meta WHERE user_id = ?').run(target.id);
